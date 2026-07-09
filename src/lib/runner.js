@@ -23,6 +23,12 @@ const liveProcesses = new Map()
 function spawnTurn(stores, run, { prompt, permissionMode, model, timeoutMinutes, startShaPromise, resumeSessionId, spawnFn }) {
   const logPath = join(stores.home, 'logs', `${run.id}.log`)
   const logStream = createWriteStream(logPath, { flags: 'a' })
+  // Readline can flush buffered lines after the exit handler has ended the
+  // stream; a write-after-end must not crash the process over a log line.
+  logStream.on('error', () => {})
+  const log = (chunk) => {
+    if (!logStream.writableEnded) logStream.write(chunk)
+  }
 
   const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose']
   if (resumeSessionId) args.push('--resume', resumeSessionId)
@@ -41,7 +47,7 @@ function spawnTurn(stores, run, { prompt, permissionMode, model, timeoutMinutes,
   liveProcesses.set(run.id, child)
 
   const timeout = setTimeout(() => {
-    logStream.write(`\n[basecamp] run timed out after ${timeoutMinutes} minutes, killing\n`)
+    log(`\n[basecamp] run timed out after ${timeoutMinutes} minutes, killing\n`)
     child.kill('SIGTERM')
   }, timeoutMinutes * 60 * 1000)
 
@@ -49,7 +55,7 @@ function spawnTurn(stores, run, { prompt, permissionMode, model, timeoutMinutes,
   let permissionDenials = []
   const rl = createInterface({ input: child.stdout, crlfDelay: Infinity })
   rl.on('line', (line) => {
-    logStream.write(line + '\n')
+    log(line + '\n')
     let event
     try {
       event = JSON.parse(line)
@@ -74,12 +80,13 @@ function spawnTurn(stores, run, { prompt, permissionMode, model, timeoutMinutes,
     }
   })
 
-  child.stderr.on('data', (chunk) => logStream.write(chunk))
+  child.stderr.on('data', (chunk) => log(chunk))
 
   child.on('error', (err) => {
     clearTimeout(timeout)
     liveProcesses.delete(run.id)
-    logStream.end(`\n[basecamp] failed to launch claude: ${err.message}\n`)
+    log(`\n[basecamp] failed to launch claude: ${err.message}\n`)
+    logStream.end()
     const failed = stores.runs.update(run.id, {
       status: 'failed',
       endedAt: Date.now(),
