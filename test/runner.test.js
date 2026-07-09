@@ -9,9 +9,19 @@ import { once } from 'node:events'
 import { Store } from '../src/lib/store.js'
 import { launchRun, approveRun, denyRun } from '../src/lib/runner.js'
 
-/** Windows keeps just-closed log file handles briefly locked — retry removal. */
+/**
+ * Best-effort temp-dir removal. Windows can hold the just-ended log stream's
+ * file handle past any reasonable retry window; these dirs live under the OS
+ * temp root, so leaving one behind is never worth failing a test over.
+ */
 function cleanup(...dirs) {
-  for (const dir of dirs) rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
+  for (const dir of dirs) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    } catch {
+      /* locked on Windows — the OS temp cleaner owns it now */
+    }
+  }
 }
 
 function tempStores() {

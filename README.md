@@ -14,6 +14,12 @@ npx claude-basecamp
 
 No install, no database, no config. Basecamp discovers the projects Claude Code already knows about and opens at `http://localhost:4747`. Runs on macOS, Linux, and Windows.
 
+<p align="center">
+  <img src=".github/screenshots/repositories.png" width="32%" alt="Repositories page listing repos with branch, uncommitted changes, and last commit" />
+  <img src=".github/screenshots/manager-chat.png" width="32%" alt="A project manager chat with the goals, routines, and runs rail visible" />
+  <img src=".github/screenshots/stats-activity.png" width="32%" alt="Stats page with the activity heatmap and token usage chart" />
+</p>
+
 ## What you can do
 
 **Talk to your repository's manager.** Every project gets a persistent agent with full Claude Code tools in that directory, plus control over Basecamp itself:
