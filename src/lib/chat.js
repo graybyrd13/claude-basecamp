@@ -41,7 +41,7 @@ curl -s -X DELETE ${api}/goals/<id>
 curl -s -X POST ${api}/runs -H 'Content-Type: application/json' -d '{"projectPath":"${projectPath}","prompt":"<task>","permissionMode":"acceptEdits","model":"sonnet"}'
 curl -s ${api}/runs   # check statuses
 
-# Intents — standing desired states Basecamp continuously reconciles (checks reality, fixes drift, escalates decisions)
+# Checks — standing conditions Basecamp continuously enforces (verifies reality, fixes failures, escalates decisions). API routes say 'intents'.
 # Builtins: tests-green | deps-fresh | backlog-triaged. Custom: plain-English text.
 curl -s -X POST ${api}/intents -H 'Content-Type: application/json' -d '{"projectPath":"${projectPath}","builtin":"tests-green","intervalMinutes":120}'
 curl -s -X POST ${api}/intents -H 'Content-Type: application/json' -d '{"projectPath":"${projectPath}","text":"The README always documents every CLI flag","intervalMinutes":720}'
@@ -49,7 +49,7 @@ curl -s "${api}/intents?project=${encodeURIComponent(projectPath)}"
 curl -s -X PUT ${api}/intents/<id> -d '{"enabled":false}' -H 'Content-Type: application/json'
 curl -s -X DELETE ${api}/intents/<id>
 # When the user expresses a DURABLE outcome ("tests should always pass", "keep deps updated", "docs must stay current"),
-# prefer creating an intent over a routine — intents verify reality and self-correct; routines just run on a clock.
+# prefer creating a check over a routine — checks verify reality and self-correct; routines just run on a clock.
 
 # Project stats / recent activity
 curl -s ${api}/overview

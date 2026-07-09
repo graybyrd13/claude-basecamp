@@ -572,3 +572,67 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   .page { padding: 18px 16px 60px; }
   .search-box { min-width: 0; }
 }
+
+/* ---------- chat landing ---------- */
+
+.chat-home {
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 16vh 24px 60px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: page-in 0.25s ease-out;
+}
+.ch-greet { font-size: 28px; font-weight: 600; letter-spacing: -0.02em; }
+.ch-sub { color: var(--muted); font-size: 13.5px; margin: 6px 0 26px; text-align: center; }
+.ch-box {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px 10px;
+  box-shadow: 0 1px 3px rgba(31, 35, 40, 0.04);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.ch-box:focus-within { border-color: var(--faint); box-shadow: 0 2px 12px rgba(31, 35, 40, 0.08); }
+.ch-box textarea {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14.5px;
+  resize: none;
+  padding: 2px;
+}
+.ch-box textarea:focus { outline: none; }
+.ch-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.ch-row select {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 10px;
+  max-width: 220px;
+}
+.ch-recent { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 26px; }
+.ch-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 5px 13px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.ch-chip:hover { background: var(--bg-subtle); border-color: var(--faint); }
+.ch-chip svg { color: var(--muted); }

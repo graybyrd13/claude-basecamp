@@ -1,7 +1,7 @@
 /* Basecamp — vanilla JS app, no build step. */
 
 const state = {
-  page: 'home',
+  page: 'chat',
   hqRepo: null,
   statsTab: 'activity',
   runId: null,
@@ -457,9 +457,71 @@ function gitChips(git) {
   return parts.join(' ')
 }
 
+/* ---------- Chat landing (default page) ---------- */
+
+async function renderChatHome() {
+  const repos = (await api('/api/projects')).filter((r) => r.exists)
+  if (!state.chatRepo || !repos.find((r) => r.path === state.chatRepo)) {
+    state.chatRepo = repos[0]?.path || null
+  }
+  const hour = new Date().getHours()
+  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
+
+  main.innerHTML = `
+    <div class="chat-home">
+      <div class="ch-greet">${greeting}</div>
+      <div class="ch-sub">Talk to a repository's manager. Mention any repo by name and the message routes itself.</div>
+      <div class="ch-box">
+        <textarea id="ch-input" rows="3" placeholder="What are we working on?"></textarea>
+        <div class="ch-row">
+          <select id="ch-repo">${repos.map((r) => `<option value="${esc(r.path)}" ${r.path === state.chatRepo ? 'selected' : ''}>${esc(repoName(r.path))}</option>`).join('')}</select>
+          <span style="flex:1"></span>
+          <button class="btn primary" id="ch-send">Send</button>
+        </div>
+      </div>
+      <div class="ch-recent">
+        ${repos.slice(0, 6).map((r) => `
+          <button class="ch-chip" data-hq="${esc(r.path)}">
+            ${icon('chat', 13)} ${esc(repoName(r.path))}
+            ${r.isActive ? '<span class="dot green pulse"></span>' : ''}
+          </button>`).join('')}
+      </div>
+    </div>`
+
+  const input = $('#ch-input')
+  const send = () => {
+    const message = input.value.trim()
+    if (!message) return
+    const lower = message.toLowerCase()
+    const mentioned = repos.find((r) => {
+      const name = repoName(r.path).toLowerCase()
+      return name.length >= 3 && lower.includes(name)
+    })
+    state.pendingChatMessage = message
+    openHQ(mentioned?.path || $('#ch-repo').value)
+  }
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      send()
+    }
+  })
+  $('#ch-send').addEventListener('click', send)
+  $('#ch-repo').addEventListener('change', (e) => { state.chatRepo = e.target.value })
+  main.querySelectorAll('[data-hq]').forEach((el) =>
+    el.addEventListener('click', () => openHQ(el.dataset.hq))
+  )
+  input.focus()
+}
+
 /* ---------- Home ---------- */
 
-async function renderHome() {
+function userIsTyping() {
+  const el = document.activeElement
+  return el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.tagName === 'SELECT')
+}
+
+async function renderHome(force = false) {
   const [overview, updates, runs, routines, digest, rescue, report, intents] = await Promise.all([
     api('/api/overview'),
     api('/api/updates'),
@@ -470,6 +532,13 @@ async function renderHome() {
     api('/api/intents/report').catch(() => null),
     api('/api/intents').catch(() => []),
   ])
+  // Re-render only when something actually changed — a silent poll must never
+  // wipe scroll position or a half-typed decision.
+  const snapshot = JSON.stringify([overview, updates.slice(0, 25), runs.slice(0, 45), routines, digest, rescue, report])
+  if (!force && snapshot === renderHome._snapshot) return
+  if (!force && userIsTyping()) return
+  renderHome._snapshot = snapshot
+
   const running = runs.filter((r) => r.status === 'running')
   const awaiting = runs.filter((r) => r.status === 'awaiting-approval')
   const upcoming = routines
@@ -491,11 +560,11 @@ async function renderHome() {
 
       ${report && report.total > 0 ? `
         <div class="digest" style="border-left-color:${report.decisions.length ? 'var(--red)' : report.drifting ? 'var(--attention)' : 'var(--green)'}">
-          <div class="d-head">${icon('pulse', 15)} Convergence
+          <div class="d-head">${icon('pulse', 15)} Checks
             <span class="muted" style="font-weight:400">
-              ${report.holding} holding${report.converging ? ` · ${report.converging} converging` : ''}${report.drifting ? ` · ${report.drifting} drifting` : ''}${report.unknown ? ` · ${report.unknown} unknown` : ''}
+              ${report.holding} passing${report.converging ? ` · ${report.converging} fixing` : ''}${report.drifting ? ` · ${report.drifting} failing` : ''}${report.unknown ? ` · ${report.unknown} unknown` : ''}
             </span>
-            <button class="btn small" style="margin-left:auto" data-page-link="intents">All intents</button>
+            <button class="btn small" style="margin-left:auto" data-page-link="intents">All checks</button>
           </div>
           ${report.decisions.map((i) => `
             <div style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-top:8px">
@@ -744,7 +813,13 @@ async function renderHQ() {
   })
 
   await Promise.all([loadChatHistory(), renderHQRail()])
-  input.focus()
+  if (state.pendingChatMessage) {
+    input.value = state.pendingChatMessage
+    state.pendingChatMessage = null
+    sendChat()
+  } else {
+    input.focus()
+  }
 }
 
 function chatBubble(role, html) {
@@ -861,6 +936,10 @@ async function renderHQRail() {
   ])
   const repoRoutines = routines.filter((r) => r.projectPath === path)
   const repoRuns = runs.filter((r) => r.projectPath === path).slice(0, 5)
+  const snapshot = JSON.stringify([sessions, goals, routines, runs.slice(0, 30)])
+  if (snapshot === renderHQRail._snapshot && $('#hq-rail')?.childElementCount) return
+  renderHQRail._snapshot = snapshot
+
   const open = goals.filter((g) => g.status === 'open')
   const done = goals.filter((g) => g.status === 'done').slice(0, 3)
   const active = sessions.filter((s) => s.isActive)
@@ -1395,8 +1474,8 @@ async function renderIntents() {
   main.innerHTML = `
     <div class="page">
       <div class="page-head">
-        <div><h1>Intents</h1><p class="subtitle">Declared desired states. Basecamp continuously checks reality, fixes drift, and escalates only genuinely human decisions.</p></div>
-        <button class="btn primary" id="new-intent">Declare intent</button>
+        <div><h1>Checks</h1><p class="subtitle">Standing checks on your repositories. Basecamp verifies them continuously, fixes failures itself, and asks you only when a human call is needed.</p></div>
+        <button class="btn primary" id="new-intent">New check</button>
       </div>
       ${intents.length ? Object.entries(byRepo).map(([path, list]) => `
         <div class="box">
@@ -1415,8 +1494,8 @@ async function renderIntents() {
             </div>`).join('')}
         </div>`).join('') : `
         <div class="box"><div class="empty">
-          No intents declared. Try the builtins — tests always green, dependencies current, backlog triaged —<br/>
-          or declare anything in plain English: <span class="muted">"the README always documents every CLI flag."</span><br/><br/>
+          No checks yet. Try the builtins — tests always green, dependencies current, backlog triaged —<br/>
+          or write anything in plain English: <span class="muted">"the README always documents every CLI flag."</span><br/><br/>
           You can also just tell a repo's manager: <span class="muted">"keep the tests green from now on."</span>
         </div></div>`}
     </div>`
@@ -1438,7 +1517,7 @@ async function renderIntents() {
   )
   main.querySelectorAll('[data-del-intent]').forEach((el) =>
     el.addEventListener('click', async () => {
-      if (!confirm('Delete this intent?')) return
+      if (!confirm('Delete this check?')) return
       await api(`/api/intents/${el.dataset.delIntent}`, { method: 'DELETE' })
       renderIntents()
     })
@@ -1448,12 +1527,12 @@ async function renderIntents() {
 async function openIntentModal(presetRepo = null) {
   const repos = await api('/api/projects')
   openModal(`
-    <h2>Declare an intent</h2>
+    <h2>New check</h2>
     <form id="intent-form">
       <label class="field">Repository
         <select name="projectPath">${repoOptions(repos, typeof presetRepo === 'string' ? presetRepo : null)}</select>
       </label>
-      <label class="field">Desired state
+      <label class="field">What must stay true
         <select name="kind" id="intent-kind">
           <option value="tests-green">Tests always green (runs your suite)</option>
           <option value="deps-fresh">Dependencies current (npm outdated)</option>
@@ -1461,7 +1540,7 @@ async function openIntentModal(presetRepo = null) {
           <option value="custom">Custom — describe it in English</option>
         </select>
       </label>
-      <label class="field hidden" id="intent-text-field">Intent
+      <label class="field hidden" id="intent-text-field">Check
         <textarea name="text" placeholder="e.g. The changelog always covers every user-facing change in main."></textarea>
       </label>
       <label class="field">Check every
@@ -1475,7 +1554,7 @@ async function openIntentModal(presetRepo = null) {
       </label>
       <div class="modal-actions">
         <button type="button" class="btn" data-close>Cancel</button>
-        <button type="submit" class="btn primary">Declare</button>
+        <button type="submit" class="btn primary">Create check</button>
       </div>
     </form>`)
   $('#intent-kind').addEventListener('change', (e) => {
@@ -1669,13 +1748,14 @@ async function openPalette() {
     })),
     { label: 'Run a task', hint: 'command', iconName: 'play', keywords: 'run task new', action: () => openTaskModal() },
     { label: 'New routine', hint: 'command', iconName: 'sync', keywords: 'routine schedule new', action: () => openRoutineModal() },
+    { label: 'Chat', hint: 'go to', iconName: 'chat', keywords: 'chat talk manager new message', action: () => go('chat') },
     { label: 'Home', hint: 'go to', iconName: 'home', keywords: 'home updates digest', action: () => go('home') },
     { label: 'Repositories', hint: 'go to', iconName: 'repo', keywords: 'repos projects', action: () => go('repos') },
     { label: 'Routines', hint: 'go to', iconName: 'sync', keywords: 'routines schedule', action: () => go('routines') },
     { label: 'Runs', hint: 'go to', iconName: 'terminal', keywords: 'runs tasks background', action: () => go('runs') },
     { label: 'Stats', hint: 'go to', iconName: 'graph', keywords: 'stats usage tokens activity', action: () => go('stats') },
-    { label: 'Intents', hint: 'go to', iconName: 'pulse', keywords: 'intents reconcile desired state converge decisions', action: () => go('intents') },
-    { label: 'Declare an intent', hint: 'command', iconName: 'pulse', keywords: 'intent declare new desired state', action: () => openIntentModal() },
+    { label: 'Checks', hint: 'go to', iconName: 'pulse', keywords: 'checks intents reconcile desired state decisions', action: () => go('intents') },
+    { label: 'New check', hint: 'command', iconName: 'pulse', keywords: 'check declare new desired state', action: () => openIntentModal() },
     { label: 'Catalog', hint: 'go to', iconName: 'plus', keywords: 'catalog install connectors skills mcp marketplace', action: () => go('catalog') },
     { label: 'Settings', hint: 'go to', iconName: 'gear', keywords: 'settings notifications slack discord telegram webhooks', action: () => go('settings') },
   ]
@@ -1740,6 +1820,7 @@ document.addEventListener('keydown', (e) => {
 /* ---------- navigation + polling ---------- */
 
 const pages = {
+  chat: renderChatHome,
   home: renderHome,
   repos: renderRepos,
   intents: renderIntents,
@@ -1752,9 +1833,10 @@ const pages = {
 }
 
 const NAV = [
+  { page: 'chat', label: 'Chat', iconName: 'chat' },
   { page: 'home', label: 'Home', iconName: 'home' },
   { page: 'repos', label: 'Repositories', iconName: 'repo' },
-  { page: 'intents', label: 'Intents', iconName: 'pulse' },
+  { page: 'intents', label: 'Checks', iconName: 'pulse' },
   { page: 'routines', label: 'Routines', iconName: 'sync' },
   { page: 'runs', label: 'Runs', iconName: 'terminal' },
   { page: 'stats', label: 'Stats', iconName: 'graph' },
@@ -1790,7 +1872,7 @@ function render() {
   })
 }
 
-$('#brand').addEventListener('click', () => go('home'))
+$('#brand').addEventListener('click', () => go('chat'))
 
 let sidebarRepos = []
 async function refreshSidebarRepos() {
@@ -1817,6 +1899,7 @@ refreshSidebarRepos()
 setInterval(() => {
   refreshSidebarRepos()
   if (!$('#modal-backdrop').classList.contains('hidden') || palette.open) return
-  if (state.page === 'home') render()
+  if (userIsTyping()) return
+  if (state.page === 'home') renderHome().catch(() => {})
   if (state.page === 'hq' && !state.chatBusy) renderHQRail()
 }, 6000)

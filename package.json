@@ -1,6 +1,6 @@
 {
   "name": "claude-basecamp",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Zero-config localhost dashboard for Claude Code \u2014 sessions, agents, usage, tasks, and connector management across Desktop, Terminal, and API.",
   "license": "Unlicense",
   "author": "Grayson Heim",
