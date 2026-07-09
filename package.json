@@ -23,7 +23,7 @@
   "scripts": {
     "start": "node bin/basecamp.js",
     "dev": "node bin/basecamp.js --no-open",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test test/*.test.js"
   },
   "keywords": [
     "claude",
