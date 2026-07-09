@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "basecamp",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["bin/basecamp.js", "--port", "4747", "--no-open"],
+      "port": 4747
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "name": "claude-basecamp",
+  "version": "0.1.0",
+  "description": "Zero-config localhost dashboard for Claude Code — sessions, agents, usage, tasks, and connector management across Desktop, Terminal, and API.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "claude-basecamp": "bin/basecamp.js"
+  },
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node bin/basecamp.js",
+    "dev": "node bin/basecamp.js --no-open",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "dashboard",
+    "sessions",
+    "agents",
+    "token-usage",
+    "mcp",
+    "anthropic"
+  ],
+  "files": [
+    "bin/",
+    "src/",
+    "public/",
+    "README.md",
+    "LICENSE"
+  ]
+}

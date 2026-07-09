@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Claude Basecamp</title>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⛺</text></svg>" />
+</head>
+<body>
+  <header>
+    <h1>⛺ Claude Basecamp</h1>
+    <span id="claude-dir" class="dim"></span>
+    <span id="live-dot" title="auto-refreshing"></span>
+  </header>
+
+  <nav id="tabs">
+    <button data-tab="overview" class="active">Overview</button>
+    <button data-tab="sessions">Sessions</button>
+    <button data-tab="agents">Agents</button>
+    <button data-tab="usage">Usage</button>
+    <button data-tab="connectors">Connectors</button>
+  </nav>
+
+  <main>
+    <section id="tab-overview" class="tab active"></section>
+    <section id="tab-sessions" class="tab"></section>
+    <section id="tab-agents" class="tab"></section>
+    <section id="tab-usage" class="tab"></section>
+    <section id="tab-connectors" class="tab"></section>
+  </main>
+
+  <footer class="dim">
+    claude-basecamp · open source ·
+    <a href="https://github.com/graysonheim/claude-basecamp" target="_blank" rel="noopener">GitHub</a>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

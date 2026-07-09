@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "gmail": { "type": "http", "url": "https://example.com/gmail-mcp" }
+  }
+}
