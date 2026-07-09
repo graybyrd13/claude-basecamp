@@ -166,6 +166,71 @@ test('heatmap returns per-day session counts', async (t) => {
   assert.ok(total >= 1)
 })
 
+test('settings persist and round-trip', async (t) => {
+  const base = await withServer(t)
+  const defaults = await (await fetch(`${base}/api/settings`)).json()
+  assert.equal(defaults.slackWebhook, '')
+  assert.equal(defaults.notifyOnSuccess, false)
+
+  const updated = await (
+    await fetch(`${base}/api/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slackWebhook: 'https://hooks.slack.com/x', notifyOnSuccess: true, bogusField: 'ignored' }),
+    })
+  ).json()
+  assert.equal(updated.slackWebhook, 'https://hooks.slack.com/x')
+  assert.equal(updated.notifyOnSuccess, true)
+  assert.equal('bogusField' in updated, false)
+})
+
+test('notify test endpoint reports no channels when unconfigured', async (t) => {
+  const base = await withServer(t)
+  const { results } = await (await fetch(`${base}/api/notify/test`, { method: 'POST' })).json()
+  assert.deepEqual(results, [])
+})
+
+test('routines get webhook tokens and unknown tokens 404', async (t) => {
+  const base = await withServer(t)
+  const created = await (
+    await fetch(`${base}/api/routines`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'hooked',
+        projectPath: '/definitely/not/real',
+        prompt: 'x',
+        schedule: { type: 'daily', time: '09:00' },
+      }),
+    })
+  ).json()
+  assert.match(created.webhookToken, /^[0-9a-f]{32}$/)
+
+  const missing = await fetch(`${base}/api/hooks/deadbeef`, { method: 'POST' })
+  assert.equal(missing.status, 404)
+
+  // Valid token but nonexistent project path: launch fails with a 400-class error.
+  const bad = await fetch(`${base}/api/hooks/${created.webhookToken}`, { method: 'POST' })
+  assert.equal(bad.status, 400)
+})
+
+test('connector add validates input and rejects bad names', async (t) => {
+  const base = await withServer(t)
+  const bad = await fetch(`${base}/api/connectors`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'evil name!', transport: 'http', url: 'https://x.example' }),
+  })
+  assert.equal(bad.status, 400)
+
+  const badUrl = await fetch(`${base}/api/connectors`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'ok-name', transport: 'http', url: 'notaurl' }),
+  })
+  assert.equal(badUrl.status, 400)
+})
+
 test('run launch validates project path before spawning', async (t) => {
   const base = await withServer(t)
   const res = await fetch(`${base}/api/runs`, {

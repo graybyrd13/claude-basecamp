@@ -1,5 +1,10 @@
 # Claude Basecamp
 
+[![Tests](https://github.com/graybyrd13/claude-basecamp/actions/workflows/test.yml/badge.svg)](https://github.com/graybyrd13/claude-basecamp/actions/workflows/test.yml)
+[![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](LICENSE)
+[![Node 18+](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](package.json)
+[![Zero dependencies](https://img.shields.io/badge/dependencies-0-black.svg)](package.json)
+
 **A manager for every project — running on your machine.** Basecamp gives each of your projects a persistent Claude manager you talk to from a localhost dashboard. It sets up automation, tracks goals, launches background work, and keeps development moving even when you're not there.
 
 ```bash
@@ -35,6 +40,18 @@ Managers remember everything across sessions — close the tab, come back tomorr
 
 **Command palette** — `Cmd+K` to jump to any repo's manager or fire any action.
 
+**Notifications** — Slack, Discord, Telegram, and macOS notifications when runs finish or fail. Configure them on the Settings page; Basecamp reaches you wherever you are.
+
+**Incoming webhooks** — every routine has a secret URL. `curl -X POST` it from CI or a GitHub Action to trigger the routine ("build failed → Claude fixes it").
+
+**GitHub issues and PRs** — each repo's manager view lists open issues and pull requests (via the `gh` CLI). One click launches a background run that works the issue end to end.
+
+**Routine templates** — one-click recipes: nightly test fixer, morning briefing, changelog keeper, TODO triager, dependency watcher.
+
+**MCP server mode** — `claude mcp add basecamp -- npx claude-basecamp mcp` and every Claude Code session can check the digest, schedule routines, and launch runs through `basecamp_*` tools.
+
+**Connector management** — view every MCP server across your Claude config, and add or remove user-scope connectors from the dashboard (explicit opt-in write with automatic backup).
+
 The UI is minimal black-and-white, GitHub-style, with no build step — and each manager keeps durable, human-readable notes in `BASECAMP.md` at the repo root.
 
 ## Options
@@ -63,8 +80,6 @@ Zero runtime dependencies. Node 18+ and an installed [Claude Code](https://claud
 - [ ] Approval queue: runs pause on permission walls instead of being denied
 - [ ] Cost guardrails: per-routine monthly budgets
 - [ ] One-click graphify export for token-heavy sessions
-- [ ] GitHub bridge: link runs to the PRs/issues they produced
-- [ ] Connector enable/disable from the dashboard
 
 ## Development
 

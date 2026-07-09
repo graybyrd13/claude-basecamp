@@ -12,6 +12,11 @@ import { launchRun, stopRun, readRunLog, runningCount } from './lib/runner.js'
 import { startScheduler, nextRunTime, describeSchedule } from './lib/scheduler.js'
 import { sendChatMessage, chatBusy, chatHistory } from './lib/chat.js'
 import { gitStatus } from './lib/git.js'
+import { repoGithub, issueRunPrompt } from './lib/github.js'
+import { addConnector, removeConnector } from './lib/connectors.js'
+import { getSettings, updateSettings } from './lib/settings.js'
+import { sendNotification } from './lib/notify.js'
+import { randomBytes } from 'node:crypto'
 
 const PUBLIC_DIR = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'public')
 const MAX_BODY_BYTES = 256 * 1024
@@ -178,6 +183,7 @@ async function handleApi(req, res, url, ctx) {
         enabled: body.enabled !== false,
         nextRun: nextRunTime(body.schedule),
         lastRun: null,
+        webhookToken: randomBytes(16).toString('hex'),
       })
       return json(res, 201, routineToJson(routine))
     }
@@ -240,6 +246,68 @@ async function handleApi(req, res, url, ctx) {
         stopRun(stores, run.id)
         return json(res, 200, stores.runs.get(run.id))
       }
+    }
+
+    // ---------- settings & notifications ----------
+    if (route === '/api/settings' && method === 'GET') {
+      return json(res, 200, getSettings(stores))
+    }
+    if (route === '/api/settings' && method === 'PUT') {
+      const body = await readBody(req)
+      return json(res, 200, updateSettings(stores, body))
+    }
+    if (route === '/api/notify/test' && method === 'POST') {
+      const results = await sendNotification(stores, {
+        title: 'Test notification',
+        body: 'Basecamp can reach you here.',
+      })
+      return json(res, 200, { results })
+    }
+
+    // ---------- incoming webhooks (fire a routine from CI etc.) ----------
+    const hookMatch = route.match(/^\/api\/hooks\/([\w-]+)$/)
+    if (hookMatch && method === 'POST') {
+      const routine = stores.routines.list().find((r) => r.webhookToken === hookMatch[1])
+      if (!routine) return json(res, 404, { error: 'Unknown webhook token' })
+      const run = launchRun(stores, {
+        projectPath: routine.projectPath,
+        prompt: routine.prompt,
+        permissionMode: routine.permissionMode,
+        model: routine.model,
+        routineId: routine.id,
+        routineName: routine.name,
+      })
+      stores.routines.update(routine.id, { lastRun: Date.now() })
+      return json(res, 201, { ok: true, runId: run.id })
+    }
+
+    // ---------- GitHub (via gh CLI) ----------
+    if (route === '/api/repo/github' && method === 'GET') {
+      const path = url.searchParams.get('path')
+      if (!path) return json(res, 400, { error: 'Missing ?path= parameter' })
+      return json(res, 200, await repoGithub(path))
+    }
+    if (route === '/api/repo/issue-run' && method === 'POST') {
+      const body = await readBody(req)
+      if (!body.path || !body.issue) return json(res, 400, { error: 'path and issue are required' })
+      const run = launchRun(stores, {
+        projectPath: body.path,
+        prompt: issueRunPrompt(Number(body.issue)),
+        permissionMode: 'acceptEdits',
+        model: body.model || 'sonnet',
+      })
+      return json(res, 201, run)
+    }
+
+    // ---------- connector management (explicit opt-in write) ----------
+    if (route === '/api/connectors' && method === 'POST') {
+      const body = await readBody(req)
+      return json(res, 201, addConnector(claudeDir, body))
+    }
+    const connectorMatch = route.match(/^\/api\/connectors\/([\w-]+)$/)
+    if (connectorMatch && method === 'DELETE') {
+      removeConnector(claudeDir, connectorMatch[1])
+      return json(res, 200, { ok: true })
     }
 
     // ---------- goals ----------
@@ -345,7 +413,9 @@ async function handleApi(req, res, url, ctx) {
 
     return json(res, 404, { error: 'Not found' })
   } catch (err) {
-    const status = /required|invalid|too large|does not exist/i.test(err.message) ? 400 : 500
+    const status = /required|invalid|too large|does not exist|must be|already exists/i.test(err.message)
+      ? 400
+      : 500
     return json(res, status, { error: err.message })
   }
 }
@@ -373,6 +443,13 @@ export function startServer({ port, claudeDir, host = '127.0.0.1', basecampHome 
   const stores = openStores(basecampHome)
   const ctx = { claudeDir, stores, port }
   startScheduler(stores)
+
+  // Backfill webhook tokens for routines created before webhooks existed.
+  for (const routine of stores.routines.list()) {
+    if (!routine.webhookToken) {
+      stores.routines.update(routine.id, { webhookToken: randomBytes(16).toString('hex') })
+    }
+  }
 
   const server = createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`)

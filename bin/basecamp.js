@@ -3,10 +3,11 @@ import { startServer } from '../src/server.js'
 import { resolveClaudeDir } from '../src/lib/paths.js'
 import { spawn } from 'node:child_process'
 
-const HELP = `claude-basecamp — localhost dashboard for Claude Code
+const HELP = `claude-basecamp — a manager for every project
 
 Usage:
-  claude-basecamp [options]
+  claude-basecamp [options]     Start the dashboard
+  claude-basecamp mcp           Run as an MCP server (proxies to a running dashboard)
 
 Options:
   --port <n>     Port to listen on (default: 4747, env: BASECAMP_PORT)
@@ -50,6 +51,14 @@ function openBrowser(url) {
   )
 }
 
+if (process.argv[2] === 'mcp') {
+  const { startMcpServer } = await import('../src/mcp-server.js')
+  startMcpServer()
+} else {
+  runDashboard()
+}
+
+function runDashboard() {
 const args = parseArgs(process.argv.slice(2))
 const claudeDir = resolveClaudeDir(args.dir)
 
@@ -63,3 +72,4 @@ startServer({ port: args.port, claudeDir })
     console.error(`Failed to start: ${err.message}`)
     process.exit(1)
   })
+}

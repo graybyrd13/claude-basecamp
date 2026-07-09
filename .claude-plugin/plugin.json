@@ -1,0 +1,10 @@
+{
+  "name": "claude-basecamp",
+  "description": "A manager for every project. Start the Basecamp dashboard or control it from any Claude Code session.",
+  "version": "0.4.0",
+  "author": { "name": "Grayson Heim" },
+  "homepage": "https://github.com/graybyrd13/claude-basecamp",
+  "repository": "https://github.com/graybyrd13/claude-basecamp",
+  "license": "Unlicense",
+  "keywords": ["dashboard", "sessions", "routines", "agents", "mcp"]
+}

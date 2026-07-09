@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { sanitizedEnv } from './env.js'
 import { headSha, commitsBetween } from './git.js'
+import { notifyRunFinished } from './notify.js'
 
 const DEFAULT_TIMEOUT_MINUTES = 30
 const OUTPUT_TAIL_CHARS = 4000
@@ -165,6 +166,7 @@ function recordRunUpdate(stores, run) {
     costUsd: run.costUsd,
     commits: run.commits || [],
   })
+  notifyRunFinished(stores, run)
 }
 
 /** Stop a running run. Returns true if a live process was signalled. */

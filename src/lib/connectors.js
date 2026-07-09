@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, copyFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { claudeJsonPath } from './paths.js'
 
@@ -58,6 +58,51 @@ export function listConnectors(claudeDir) {
   }
 
   return connectors.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * Add an MCP server to the user-scope mcpServers in ~/.claude.json.
+ * This is the ONE place Basecamp writes to Claude's config — the UI requires
+ * explicit confirmation, and the first write creates a one-time backup at
+ * .claude.json.basecamp-backup.
+ */
+export function addConnector(claudeDir, { name, transport, url, command, args }) {
+  if (!name || !/^[\w-]+$/.test(name)) throw new Error('Connector name must be alphanumeric/dashes')
+  if (transport === 'http' || transport === 'sse') {
+    if (!url || !/^https?:\/\//.test(url)) throw new Error('A valid http(s) url is required')
+  } else if (transport === 'stdio') {
+    if (!command) throw new Error('A command is required for stdio connectors')
+  } else {
+    throw new Error('transport must be http, sse, or stdio')
+  }
+
+  const path = claudeJsonPath(claudeDir)
+  const config = safeReadJson(path)
+  if (!config) throw new Error(`Cannot read ${path}`)
+  if (config.mcpServers?.[name]) throw new Error(`Connector "${name}" already exists`)
+
+  const backup = `${path}.basecamp-backup`
+  if (!existsSync(backup)) copyFileSync(path, backup)
+
+  const server =
+    transport === 'stdio'
+      ? { type: 'stdio', command, args: args || [] }
+      : { type: transport, url }
+  const updated = { ...config, mcpServers: { ...(config.mcpServers || {}), [name]: server } }
+  writeFileSync(path, JSON.stringify(updated, null, 2))
+  return describeServer(name, server, 'user')
+}
+
+/** Remove a user-scope MCP server added in ~/.claude.json. */
+export function removeConnector(claudeDir, name) {
+  const path = claudeJsonPath(claudeDir)
+  const config = safeReadJson(path)
+  if (!config?.mcpServers?.[name]) throw new Error(`No user-scope connector named "${name}"`)
+  const backup = `${path}.basecamp-backup`
+  if (!existsSync(backup)) copyFileSync(path, backup)
+  const { [name]: _removed, ...rest } = config.mcpServers
+  writeFileSync(path, JSON.stringify({ ...config, mcpServers: rest }, null, 2))
+  return true
 }
 
 /** List installed plugins from <claudeDir>/plugins if present. */

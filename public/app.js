@@ -188,11 +188,12 @@ async function openTaskModal(repoPath = null, presetPrompt = '') {
   })
 }
 
+/** routine may be a saved routine (has .id → edit) or a template draft (no .id → create prefilled). */
 async function openRoutineModal(routine = null, presetRepo = null) {
   const repos = await api('/api/projects')
   const s = routine?.schedule || {}
   openModal(`
-    <h2>${routine ? 'Edit routine' : 'New routine'}</h2>
+    <h2>${routine?.id ? 'Edit routine' : 'New routine'}</h2>
     <form id="routine-form">
       <label class="field">Name
         <input name="name" value="${esc(routine?.name || '')}" placeholder="Nightly tests" required />
@@ -227,7 +228,7 @@ async function openRoutineModal(routine = null, presetRepo = null) {
       ${modelPermissionFields()}
       <div class="modal-actions">
         <button type="button" class="btn" data-close>Cancel</button>
-        <button type="submit" class="btn primary">${routine ? 'Save' : 'Create routine'}</button>
+        <button type="submit" class="btn primary">${routine?.id ? 'Save' : 'Create routine'}</button>
       </div>
     </form>`)
   if (routine?.permissionMode) $('#routine-form [name=permissionMode]').value = routine.permissionMode
@@ -256,10 +257,72 @@ async function openRoutineModal(routine = null, presetRepo = null) {
       model: fields.model || null,
       schedule,
     }
-    if (routine) await api(`/api/routines/${routine.id}`, { method: 'PUT', body })
+    if (routine?.id) await api(`/api/routines/${routine.id}`, { method: 'PUT', body })
     else await api('/api/routines', { method: 'POST', body })
     render()
   })
+}
+
+/* ---------- routine templates ---------- */
+
+const TEMPLATES = [
+  {
+    label: 'Nightly test fixer',
+    description: 'Runs the suite every night; fixes and commits failures.',
+    name: 'Nightly tests',
+    prompt: 'Run the full test suite. If anything fails, diagnose and fix it, re-run until green, and commit the fixes with clear messages. If everything passes, say so briefly.',
+    schedule: { type: 'daily', time: '21:00' },
+  },
+  {
+    label: 'Morning briefing',
+    description: 'A daily summary of commits, TODOs, and suggested next steps.',
+    name: 'Morning briefing',
+    prompt: 'Summarize what changed in this repository in the last 24 hours (git log). List open TODO/FIXME comments and any failing checks. End with the three most valuable next steps.',
+    schedule: { type: 'daily', time: '08:30' },
+    permissionMode: 'plan',
+  },
+  {
+    label: 'Changelog keeper',
+    description: 'Keeps CHANGELOG.md current with recent commits.',
+    name: 'Changelog keeper',
+    prompt: 'Review commits since the last CHANGELOG.md update and add concise entries for user-facing changes under an Unreleased heading. Create the file if missing. Commit the update.',
+    schedule: { type: 'weekly', day: 5, time: '16:00' },
+  },
+  {
+    label: 'TODO triager',
+    description: 'Collects TODO/FIXME comments into a prioritized list.',
+    name: 'TODO triage',
+    prompt: 'Find all TODO, FIXME, and HACK comments in the codebase. Write them into TODO.md grouped by priority with file references, removing entries that no longer exist. Commit the update.',
+    schedule: { type: 'weekly', day: 1, time: '09:00' },
+  },
+  {
+    label: 'Dependency watcher',
+    description: 'Checks for outdated or vulnerable dependencies.',
+    name: 'Dependency check',
+    prompt: 'Check for outdated and vulnerable dependencies using the appropriate package manager. Report what should be updated and why. Do not update anything without noting breaking changes.',
+    schedule: { type: 'weekly', day: 3, time: '10:00' },
+    permissionMode: 'plan',
+  },
+]
+
+function openTemplatePicker() {
+  openModal(`
+    <h2>Routine templates</h2>
+    ${TEMPLATES.map((t, i) => `
+      <div class="row clickable" data-template="${i}" style="border:1px solid var(--border-muted);border-radius:6px;margin-bottom:8px">
+        <div class="grow">
+          <div class="title">${esc(t.label)}</div>
+          <div class="sub">${esc(t.description)}</div>
+        </div>
+      </div>`).join('')}
+    <div class="modal-actions"><button type="button" class="btn" id="tpl-close">Cancel</button></div>`)
+  $('#tpl-close').addEventListener('click', closeModal)
+  document.querySelectorAll('[data-template]').forEach((el) =>
+    el.addEventListener('click', () => {
+      closeModal()
+      openRoutineModal({ ...TEMPLATES[Number(el.dataset.template)] })
+    })
+  )
 }
 
 function wireModalForm(selector, onSubmit) {
@@ -720,7 +783,11 @@ async function renderHQRail() {
         <div class="t"><span>${esc((r.routineName || r.prompt).slice(0, 30))}</span>${statusChip(r.status)}</div>
         <div class="s">${fmtTime(r.startedAt)}${(r.commits || []).length ? ` · ${r.commits.length} commit${r.commits.length === 1 ? '' : 's'}` : ''}${r.costUsd ? ` · $${r.costUsd.toFixed(2)}` : ''}</div>
       </div>`).join('') || '<div class="faint" style="font-size:12px">No background runs yet.</div>'}
+
+    <h2>GitHub</h2>
+    <div id="hq-github"><div class="faint" style="font-size:12px">Checking…</div></div>
   `
+  renderHQGithub()
   rail.querySelectorAll('[data-goal]').forEach((el) =>
     el.addEventListener('click', async () => {
       await api(`/api/goals/${el.dataset.goal}`, {
@@ -732,6 +799,47 @@ async function renderHQRail() {
   )
 }
 
+async function renderHQGithub() {
+  const el = $('#hq-github')
+  if (!el) return
+  try {
+    const gh = await api(`/api/repo/github?path=${encodeURIComponent(state.hqRepo)}`)
+    const current = $('#hq-github')
+    if (!current) return
+    if (!gh.available) {
+      current.innerHTML = `<div class="faint" style="font-size:12px">${esc(gh.reason)}</div>`
+      return
+    }
+    current.innerHTML = `
+      ${gh.issues.map((i) => `
+        <div class="rail-item">
+          <div class="t"><span>#${i.number} ${esc(i.title.slice(0, 34))}</span>
+            <button class="btn small" data-issue="${i.number}" title="Launch a background run on this issue">Work on it</button>
+          </div>
+          <div class="s">issue · ${fmtTime(Date.parse(i.updatedAt))}</div>
+        </div>`).join('')}
+      ${gh.prs.map((p) => `
+        <div class="rail-item">
+          <div class="t"><span>#${p.number} ${esc(p.title.slice(0, 38))}</span>${p.isDraft ? '<span class="chip">draft</span>' : '<span class="chip green">open</span>'}</div>
+          <div class="s">pull request · ${fmtTime(Date.parse(p.updatedAt))}</div>
+        </div>`).join('')}
+      ${gh.issues.length === 0 && gh.prs.length === 0 ? '<div class="faint" style="font-size:12px">No open issues or pull requests.</div>' : ''}
+    `
+    current.querySelectorAll('[data-issue]').forEach((btn) =>
+      btn.addEventListener('click', async () => {
+        btn.disabled = true
+        btn.textContent = 'Launched'
+        await api('/api/repo/issue-run', {
+          method: 'POST',
+          body: { path: state.hqRepo, issue: Number(btn.dataset.issue) },
+        })
+      })
+    )
+  } catch (err) {
+    if ($('#hq-github')) $('#hq-github').innerHTML = `<div class="faint" style="font-size:12px">${esc(err.message)}</div>`
+  }
+}
+
 /* ---------- Routines ---------- */
 
 async function renderRoutines() {
@@ -739,8 +847,11 @@ async function renderRoutines() {
   main.innerHTML = `
     <div class="page">
       <div class="page-head">
-        <div><h1>Routines</h1><p class="subtitle">Scheduled prompts that run Claude Code automatically. Managers can create these too.</p></div>
-        <button class="btn primary" id="new-routine">New routine</button>
+        <div><h1>Routines</h1><p class="subtitle">Scheduled prompts that run Claude Code automatically. Managers can create these too. Each routine also has a webhook URL for triggering from CI.</p></div>
+        <span style="display:flex;gap:8px">
+          <button class="btn" id="templates">Templates</button>
+          <button class="btn primary" id="new-routine">New routine</button>
+        </span>
       </div>
       ${routines.length ? `
         <div class="box">
@@ -756,6 +867,7 @@ async function renderRoutines() {
               </div>
               <span style="white-space:nowrap;display:flex;gap:6px">
                 <button class="btn small" data-fire="${r.id}" title="Run now">${icon('play', 12)}</button>
+                <button class="btn small" data-hook="${esc(r.webhookToken || '')}" title="Copy webhook URL">Webhook</button>
                 <button class="btn small" data-toggle="${r.id}">${r.enabled ? 'Pause' : 'Resume'}</button>
                 <button class="btn small" data-edit="${r.id}">Edit</button>
                 <button class="btn small danger" data-del="${r.id}">${icon('x', 12)}</button>
@@ -768,6 +880,15 @@ async function renderRoutines() {
         </div></div>`}
     </div>`
   $('#new-routine')?.addEventListener('click', () => openRoutineModal())
+  $('#templates')?.addEventListener('click', openTemplatePicker)
+  main.querySelectorAll('[data-hook]').forEach((el) =>
+    el.addEventListener('click', async () => {
+      const hookUrl = `${location.origin}/api/hooks/${el.dataset.hook}`
+      await navigator.clipboard.writeText(`curl -X POST ${hookUrl}`)
+      el.textContent = 'Copied'
+      setTimeout(() => { el.textContent = 'Webhook' }, 1500)
+    })
+  )
   main.querySelectorAll('[data-fire]').forEach((el) =>
     el.addEventListener('click', async () => {
       await api(`/api/routines/${el.dataset.fire}/run`, { method: 'POST' })
@@ -1014,11 +1135,14 @@ async function renderStatsAgents(body) {
 async function renderStatsConnectors(body) {
   const { connectors, plugins } = await api('/api/connectors')
   body.innerHTML = `
-    <p class="muted" style="margin-bottom:10px;font-size:13px">MCP servers and extensions across your Claude configuration. Manage with <code class="mono">claude mcp</code> or <code class="mono">/mcp</code>.</p>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <p class="muted" style="font-size:13px">MCP servers and extensions across your Claude configuration.</p>
+      <button class="btn small" id="add-connector">Add connector</button>
+    </div>
     ${connectors.length ? `
       <div class="box">
         <table>
-          <thead><tr><th>Connector</th><th>Transport</th><th>Scope</th><th>Source</th></tr></thead>
+          <thead><tr><th>Connector</th><th>Transport</th><th>Scope</th><th>Source</th><th></th></tr></thead>
           <tbody>
             ${connectors.map((c) => `
               <tr>
@@ -1026,6 +1150,7 @@ async function renderStatsConnectors(body) {
                 <td><span class="chip">${esc(c.transport)}</span></td>
                 <td class="muted">${esc(c.scope.startsWith('project:') ? repoName(c.scope.slice(8)) : c.scope)}</td>
                 <td class="muted mono">${esc((c.url || c.command || '').slice(0, 60))}</td>
+                <td class="num">${c.scope === 'user' ? `<button class="btn small danger" data-rm-connector="${esc(c.name)}">Remove</button>` : ''}</td>
               </tr>`).join('')}
           </tbody>
         </table>
@@ -1038,6 +1163,143 @@ async function renderStatsConnectors(body) {
         </tbody></table>
       </div>` : ''}
   `
+  $('#add-connector')?.addEventListener('click', openConnectorModal)
+  body.querySelectorAll('[data-rm-connector]').forEach((el) =>
+    el.addEventListener('click', async () => {
+      if (!confirm(`Remove connector "${el.dataset.rmConnector}" from ~/.claude.json? A backup is kept at .claude.json.basecamp-backup.`)) return
+      await api(`/api/connectors/${encodeURIComponent(el.dataset.rmConnector)}`, { method: 'DELETE' })
+      renderStats()
+    })
+  )
+}
+
+function openConnectorModal() {
+  openModal(`
+    <h2>Add MCP connector</h2>
+    <p class="muted" style="font-size:12.5px;margin-bottom:14px">This writes to <span class="mono">~/.claude.json</span> (user scope) — the only place Basecamp modifies Claude configuration. A one-time backup is created first.</p>
+    <form id="connector-form">
+      <label class="field">Name
+        <input name="name" placeholder="linear" pattern="[\\w-]+" required />
+      </label>
+      <label class="field">Transport
+        <select name="transport" id="connector-transport">
+          <option value="http">HTTP (remote server)</option>
+          <option value="sse">SSE (remote server)</option>
+          <option value="stdio">stdio (local command)</option>
+        </select>
+      </label>
+      <label class="field" id="connector-url-field">URL
+        <input name="url" placeholder="https://mcp.example.com/mcp" />
+      </label>
+      <label class="field hidden" id="connector-cmd-field">Command
+        <input name="command" placeholder="npx some-mcp-server" />
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>Cancel</button>
+        <button type="submit" class="btn primary">Add connector</button>
+      </div>
+    </form>`)
+  $('#connector-transport').addEventListener('change', (e) => {
+    const isStdio = e.target.value === 'stdio'
+    $('#connector-url-field').classList.toggle('hidden', isStdio)
+    $('#connector-cmd-field').classList.toggle('hidden', !isStdio)
+  })
+  wireModalForm('#connector-form', async (fields) => {
+    const [command, ...args] = (fields.command || '').split(/\s+/).filter(Boolean)
+    await api('/api/connectors', {
+      method: 'POST',
+      body: {
+        name: fields.name,
+        transport: fields.transport,
+        url: fields.url || undefined,
+        command: command || undefined,
+        args: args.length ? args : undefined,
+      },
+    })
+    renderStats()
+  })
+}
+
+/* ---------- Settings ---------- */
+
+async function renderSettings() {
+  const s = await api('/api/settings')
+  main.innerHTML = `
+    <div class="page">
+      <h1>Settings</h1>
+      <p class="subtitle">Notification connectors — Basecamp reaches you when runs finish or fail, wherever you are.</p>
+      <div class="box box-pad" style="max-width:560px">
+        <form id="settings-form">
+          <label class="field">Slack webhook URL
+            <input name="slackWebhook" value="${esc(s.slackWebhook)}" placeholder="https://hooks.slack.com/services/…" />
+          </label>
+          <label class="field">Discord webhook URL
+            <input name="discordWebhook" value="${esc(s.discordWebhook)}" placeholder="https://discord.com/api/webhooks/…" />
+          </label>
+          <div class="field-row">
+            <label class="field">Telegram bot token
+              <input name="telegramBotToken" value="${esc(s.telegramBotToken)}" placeholder="123456:ABC…" />
+            </label>
+            <label class="field">Telegram chat ID
+              <input name="telegramChatId" value="${esc(s.telegramChatId)}" placeholder="-100123456" />
+            </label>
+          </div>
+          <label class="field" style="display:flex;align-items:center;gap:8px;font-weight:500">
+            <input type="checkbox" name="macosNotifications" style="width:auto;margin:0" ${s.macosNotifications ? 'checked' : ''} />
+            macOS notifications
+          </label>
+          <label class="field" style="display:flex;align-items:center;gap:8px;font-weight:500">
+            <input type="checkbox" name="notifyOnSuccess" style="width:auto;margin:0" ${s.notifyOnSuccess ? 'checked' : ''} />
+            Also notify on successful runs (failures always notify)
+          </label>
+          <div class="modal-actions" style="justify-content:flex-start">
+            <button type="submit" class="btn primary">Save</button>
+            <button type="button" class="btn" id="test-notify">Send test notification</button>
+            <span id="settings-status" class="muted" style="align-self:center;font-size:12.5px"></span>
+          </div>
+        </form>
+      </div>
+
+      <h2>Trigger routines from anywhere</h2>
+      <div class="box box-pad" style="max-width:560px">
+        <p class="muted" style="font-size:13px;margin-bottom:8px">Every routine has a secret webhook URL (copy it from the Routines page). POST to it from CI, a GitHub Action, or anything else:</p>
+        <div class="log-view" style="max-height:none">curl -X POST http://localhost:4747/api/hooks/&lt;token&gt;</div>
+      </div>
+
+      <h2>Use Basecamp from any Claude session</h2>
+      <div class="box box-pad" style="max-width:560px">
+        <p class="muted" style="font-size:13px;margin-bottom:8px">Register Basecamp as an MCP server and any Claude Code session can check the digest, schedule routines, and launch runs:</p>
+        <div class="log-view" style="max-height:none">claude mcp add basecamp -- npx claude-basecamp mcp</div>
+      </div>
+    </div>`
+
+  const form = $('#settings-form')
+  const status = $('#settings-status')
+  const collect = () => {
+    const data = Object.fromEntries(new FormData(form).entries())
+    return {
+      slackWebhook: data.slackWebhook || '',
+      discordWebhook: data.discordWebhook || '',
+      telegramBotToken: data.telegramBotToken || '',
+      telegramChatId: data.telegramChatId || '',
+      macosNotifications: form.macosNotifications.checked,
+      notifyOnSuccess: form.notifyOnSuccess.checked,
+    }
+  }
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    await api('/api/settings', { method: 'PUT', body: collect() })
+    status.textContent = 'Saved'
+    setTimeout(() => { status.textContent = '' }, 2000)
+  })
+  $('#test-notify').addEventListener('click', async () => {
+    await api('/api/settings', { method: 'PUT', body: collect() })
+    status.textContent = 'Sending…'
+    const { results } = await api('/api/notify/test', { method: 'POST' })
+    status.textContent = results.length
+      ? results.map((r) => `${r.channel}: ${r.ok ? 'ok' : r.error || 'failed'}`).join(' · ')
+      : 'No channels configured'
+  })
 }
 
 /* ---------- command palette ---------- */
@@ -1070,6 +1332,7 @@ async function openPalette() {
     { label: 'Routines', hint: 'go to', iconName: 'sync', keywords: 'routines schedule', action: () => go('routines') },
     { label: 'Runs', hint: 'go to', iconName: 'terminal', keywords: 'runs tasks background', action: () => go('runs') },
     { label: 'Stats', hint: 'go to', iconName: 'graph', keywords: 'stats usage tokens activity', action: () => go('stats') },
+    { label: 'Settings', hint: 'go to', iconName: 'gear', keywords: 'settings notifications slack discord telegram webhooks', action: () => go('settings') },
   ]
   renderPaletteList('')
 }
@@ -1137,6 +1400,7 @@ const pages = {
   routines: renderRoutines,
   runs: renderRuns,
   stats: renderStats,
+  settings: renderSettings,
   hq: renderHQ,
 }
 
@@ -1146,6 +1410,7 @@ const NAV = [
   { page: 'routines', label: 'Routines', iconName: 'sync' },
   { page: 'runs', label: 'Runs', iconName: 'terminal' },
   { page: 'stats', label: 'Stats', iconName: 'graph' },
+  { page: 'settings', label: 'Settings', iconName: 'gear' },
 ]
 
 function renderNav() {
