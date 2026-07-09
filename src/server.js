@@ -11,6 +11,7 @@ import { openStores } from './lib/store.js'
 import { launchRun, stopRun, readRunLog, runningCount } from './lib/runner.js'
 import { startScheduler, nextRunTime, describeSchedule } from './lib/scheduler.js'
 import { sendChatMessage, chatBusy, chatHistory } from './lib/chat.js'
+import { gitStatus } from './lib/git.js'
 
 const PUBLIC_DIR = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'public')
 const MAX_BODY_BYTES = 256 * 1024
@@ -112,7 +113,23 @@ async function handleApi(req, res, url, ctx) {
       })
     }
     if (route === '/api/projects' && method === 'GET') {
-      return json(res, 200, listRealProjects(claudeDir))
+      const projects = listRealProjects(claudeDir)
+      if (url.searchParams.get('git') !== '1') return json(res, 200, projects)
+      const enriched = await Promise.all(
+        projects.map(async (p) => ({
+          ...p,
+          git: p.exists ? await gitStatus(p.path) : null,
+        }))
+      )
+      return json(res, 200, enriched)
+    }
+    if (route === '/api/repo/sessions' && method === 'GET') {
+      // Active/recent sessions for one repo — shown inside the manager chat rail.
+      const path = url.searchParams.get('path')
+      if (!path) return json(res, 400, { error: 'Missing ?path= parameter' })
+      const project = listRealProjects(claudeDir).find((p) => p.path === path)
+      if (!project) return json(res, 200, [])
+      return json(res, 200, listSessions(claudeDir, project.id).slice(0, 8))
     }
     if (route === '/api/sessions' && method === 'GET') {
       const projectId = url.searchParams.get('project')
@@ -283,6 +300,38 @@ async function handleApi(req, res, url, ctx) {
         res.write(JSON.stringify({ type: 'done', error: err.message }) + '\n')
       }
       return res.end()
+    }
+
+    // ---------- away digest ----------
+    if (route === '/api/digest' && method === 'GET') {
+      const meta = stores.managers.list().find((m) => m.key === 'lastSeen')
+      const since = meta?.value || 0
+      const items = stores.updates.list().filter((u) => u.createdAt > since)
+      return json(res, 200, { since, items })
+    }
+    if (route === '/api/digest/ack' && method === 'POST') {
+      const meta = stores.managers.list().find((m) => m.key === 'lastSeen')
+      if (meta) stores.managers.update(meta.id, { value: Date.now() })
+      else stores.managers.insert({ key: 'lastSeen', value: Date.now() })
+      return json(res, 200, { ok: true })
+    }
+
+    // ---------- activity heatmap ----------
+    if (route === '/api/heatmap' && method === 'GET') {
+      const days = Math.min(Number(url.searchParams.get('days')) || 182, 366)
+      const cutoff = Date.now() - days * 86400e3
+      const counts = {}
+      const bump = (ms) => {
+        if (!ms || ms < cutoff) return
+        const day = new Date(ms).toISOString().slice(0, 10)
+        counts[day] = (counts[day] || 0) + 1
+      }
+      for (const project of listProjects(claudeDir)) {
+        if (project.lastModified < cutoff) continue
+        for (const session of listSessions(claudeDir, project.id)) bump(session.lastModified)
+      }
+      for (const run of stores.runs.list()) bump(run.startedAt)
+      return json(res, 200, { days, counts })
     }
 
     // ---------- updates feed ----------

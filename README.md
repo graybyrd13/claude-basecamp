@@ -1,4 +1,4 @@
-# ⛺ Claude Basecamp
+# Claude Basecamp
 
 **A manager for every project — running on your machine.** Basecamp gives each of your projects a persistent Claude manager you talk to from a localhost dashboard. It sets up automation, tracks goals, launches background work, and keeps development moving even when you're not there.
 
@@ -10,7 +10,7 @@ No install, no database, no config. Basecamp discovers the projects Claude Code 
 
 ## What you can do
 
-**💬 Talk to your project's manager.** Every project gets a persistent agent with full Claude Code tools in that directory, plus control over Basecamp itself:
+**Talk to your repository's manager.** Every project gets a persistent agent with full Claude Code tools in that directory, plus control over Basecamp itself:
 
 > *"Run the test suite every night at 9 and fix whatever fails."* → it creates the routine
 > *"Our goal is to ship v1 by end of month — track it."* → it records the goal
@@ -19,15 +19,23 @@ No install, no database, no config. Basecamp discovers the projects Claude Code 
 
 Managers remember everything across sessions — close the tab, come back tomorrow, it knows where you left off.
 
-**↻ Routines** — scheduled prompts that run Claude Code headless in your projects (every N minutes, daily, weekly). Created in the UI or by asking a manager.
+**Routines** — scheduled prompts that run Claude Code headless in your projects (every N minutes, daily, weekly). Created in the UI or by asking a manager.
 
-**▶ Background runs** — one-off tasks ("continue development", "fix the failing CI") that run without blocking anything, with live logs, cost tracking, and stop buttons.
+**Background runs** — one-off tasks ("continue development", "fix the failing CI") that run without blocking anything, with live logs, cost tracking, and stop buttons.
 
-**☀︎ Updates feed** — every routine result and finished run reports back here. Open Basecamp in the morning and see what happened overnight.
+**Updates feed** — every routine result and finished run reports back here. Open Basecamp in the morning and see what happened overnight.
 
-**◎ Goals** — per-project objectives, visible next to the chat, checked off by you or the manager.
+**Goals** — per-project objectives, visible next to the chat, checked off by you or the manager.
 
-**∿ Stats** — sessions, agents, token usage, daily activity, MCP connectors, and graphify candidates (sessions with heavy repeated-context reads, the best targets for knowledge-graph token reduction) across Claude Desktop, terminal, and API usage on your machine.
+**Away digest** — open Basecamp after time away and the top of Home summarizes everything that happened since you last looked.
+
+**Git-aware repositories** — every repo shows its branch, uncommitted changes, ahead/behind state, and last commit. Runs that produce commits are linked to them in the feed. Active Claude sessions are visible inside each repo's manager view.
+
+**Stats** — an activity heatmap, animated token charts, background-run performance (success rate, durations, cost, commits), agents, MCP connectors, and graphify candidates (sessions with heavy repeated-context reads, the best targets for knowledge-graph token reduction).
+
+**Command palette** — `Cmd+K` to jump to any repo's manager or fire any action.
+
+The UI is minimal black-and-white, GitHub-style, with no build step — and each manager keeps durable, human-readable notes in `BASECAMP.md` at the repo root.
 
 ## Options
 
@@ -52,7 +60,8 @@ Zero runtime dependencies. Node 18+ and an installed [Claude Code](https://claud
 
 ## Roadmap
 
-- [ ] Away digest: manager summarizes what happened since you last opened Basecamp
+- [ ] Approval queue: runs pause on permission walls instead of being denied
+- [ ] Cost guardrails: per-routine monthly budgets
 - [ ] One-click graphify export for token-heavy sessions
 - [ ] GitHub bridge: link runs to the PRs/issues they produced
 - [ ] Connector enable/disable from the dashboard

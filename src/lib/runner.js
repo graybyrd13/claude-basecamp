@@ -3,6 +3,7 @@ import { createWriteStream, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { sanitizedEnv } from './env.js'
+import { headSha, commitsBetween } from './git.js'
 
 const DEFAULT_TIMEOUT_MINUTES = 30
 const OUTPUT_TAIL_CHARS = 4000
@@ -52,7 +53,11 @@ export function launchRun(stores, options) {
     numTurns: null,
     sessionId: null,
     error: null,
+    commits: [],
   })
+
+  // Snapshot HEAD so commits made by this run can be linked to it afterwards.
+  const startShaPromise = headSha(projectPath)
 
   const logPath = join(stores.home, 'logs', `${run.id}.log`)
   const logStream = createWriteStream(logPath)
@@ -117,15 +122,25 @@ export function launchRun(stores, options) {
     recordRunUpdate(stores, failed)
   })
 
-  child.on('exit', (code, signal) => {
+  child.on('exit', async (code, signal) => {
     clearTimeout(timeout)
     liveProcesses.delete(run.id)
     logStream.end()
     const current = stores.runs.get(run.id)
     if (!current || current.status !== 'running') return
+
+    let commits = []
+    try {
+      const startSha = await startShaPromise
+      commits = await commitsBetween(projectPath, startSha, await headSha(projectPath))
+    } catch {
+      /* not a repo, or git unavailable — linkage is best-effort */
+    }
+
     const finished = stores.runs.update(run.id, {
       status: code === 0 ? 'succeeded' : 'failed',
       endedAt: Date.now(),
+      commits,
       error: code === 0 ? null : signal ? `killed (${signal})` : `exited with code ${code}`,
     })
     recordRunUpdate(stores, finished)
@@ -141,12 +156,14 @@ function recordRunUpdate(stores, run) {
   stores.updates.insert({
     kind: run.status === 'succeeded' ? 'run-succeeded' : 'run-failed',
     runId: run.id,
+    projectPath: run.projectPath,
     title:
       run.status === 'succeeded'
         ? `${label} finished in ${projectName}`
         : `${label} failed in ${projectName}`,
     body: run.resultText || run.error || null,
     costUsd: run.costUsd,
+    commits: run.commits || [],
   })
 }
 

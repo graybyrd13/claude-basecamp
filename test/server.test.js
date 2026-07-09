@@ -144,6 +144,28 @@ test('chat history endpoint returns empty history for fresh project', async (t) 
   assert.equal(data.busy, false)
 })
 
+test('digest tracks updates since last ack', async (t) => {
+  const base = await withServer(t)
+
+  const initial = await (await fetch(`${base}/api/digest`)).json()
+  assert.equal(initial.since, 0)
+
+  const ack = await fetch(`${base}/api/digest/ack`, { method: 'POST' })
+  assert.equal(ack.status, 200)
+
+  const after = await (await fetch(`${base}/api/digest`)).json()
+  assert.ok(after.since > 0)
+  assert.deepEqual(after.items, [])
+})
+
+test('heatmap returns per-day session counts', async (t) => {
+  const base = await withServer(t)
+  const res = await (await fetch(`${base}/api/heatmap?days=36500`)).json()
+  // The fixture session's mtime lands on some day; total count must be >= 1.
+  const total = Object.values(res.counts).reduce((a, b) => a + b, 0)
+  assert.ok(total >= 1)
+})
+
 test('run launch validates project path before spawning', async (t) => {
   const base = await withServer(t)
   const res = await fetch(`${base}/api/runs`, {

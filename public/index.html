@@ -3,31 +3,38 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Claude Basecamp</title>
+  <title>Basecamp</title>
   <link rel="stylesheet" href="/style.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⛺</text></svg>" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%231f2328'/%3E%3Cpath d='M8 3.5 3.5 12h9L8 3.5z' fill='none' stroke='white' stroke-width='1.4' stroke-linejoin='round'/%3E%3C/svg%3E" />
 </head>
 <body>
-  <aside id="sidebar">
-    <div class="logo">⛺<span class="wordmark">basecamp</span></div>
-    <nav id="nav-main">
-      <button data-page="home" class="active"><span class="icon">⌂</span><span class="nav-label">Home</span></button>
-      <button data-page="projects"><span class="icon">▦</span><span class="nav-label">Projects</span></button>
-      <button data-page="routines"><span class="icon">↻</span><span class="nav-label">Routines</span></button>
-      <button data-page="runs"><span class="icon">▶</span><span class="nav-label">Runs</span></button>
-      <button data-page="stats"><span class="icon">∿</span><span class="nav-label">Stats</span></button>
-    </nav>
-    <div class="nav-section-title">Managers</div>
-    <nav id="nav-projects"></nav>
-    <div class="sidebar-footer">
-      <div id="running-indicator" class="hidden"><span class="pulse-dot"></span><span id="running-count"></span> working</div>
-      <a href="https://github.com/graysonheim/claude-basecamp" target="_blank" rel="noopener">open source ↗</a>
+  <header id="topbar">
+    <div class="brand" id="brand">
+      <svg viewBox="0 0 16 16" width="22" height="22" aria-hidden="true"><rect width="16" height="16" rx="4" fill="currentColor"/><path d="M8 3.5 3.5 12h9L8 3.5z" fill="none" stroke="var(--bg)" stroke-width="1.4" stroke-linejoin="round"/></svg>
+      <span class="wordmark">basecamp</span>
     </div>
-  </aside>
+    <button id="palette-trigger" class="search-box" title="Command palette">
+      <svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M10.68 11.74a6 6 0 1 1 1.06-1.06l3.04 3.04a.75.75 0 1 1-1.06 1.06ZM11.5 7a4.5 4.5 0 1 0-9 0 4.5 4.5 0 0 0 9 0Z"/></svg>
+      <span>Jump to…</span>
+      <kbd>⌘K</kbd>
+    </button>
+    <div class="topbar-right">
+      <span id="running-indicator" class="hidden"><span class="dot green pulse"></span><span id="running-count"></span> running</span>
+      <a href="https://github.com/graysonheim/claude-basecamp" target="_blank" rel="noopener" class="muted">GitHub</a>
+    </div>
+  </header>
 
-  <main id="main"></main>
+  <div id="shell">
+    <aside id="sidebar">
+      <nav id="nav-main"></nav>
+      <div class="nav-section-title">Repositories</div>
+      <nav id="nav-repos"></nav>
+    </aside>
+    <main id="main"></main>
+  </div>
 
   <div id="modal-backdrop" class="hidden"><div id="modal"></div></div>
+  <div id="palette-backdrop" class="hidden"><div id="palette"><input id="palette-input" placeholder="Type a repo or command…" autocomplete="off" /><div id="palette-list"></div></div></div>
 
   <script src="/app.js"></script>
 </body>
