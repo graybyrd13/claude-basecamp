@@ -1,0 +1,164 @@
+{
+  "version": 1,
+  "connectors": [
+    {
+      "id": "github",
+      "name": "GitHub",
+      "description": "Repos, issues, pull requests, and code search. Authenticate with /mcp after installing.",
+      "transport": "http",
+      "url": "https://api.githubcopilot.com/mcp/"
+    },
+    {
+      "id": "notion",
+      "name": "Notion",
+      "description": "Read and write Notion pages and databases.",
+      "transport": "http",
+      "url": "https://mcp.notion.com/mcp"
+    },
+    {
+      "id": "linear",
+      "name": "Linear",
+      "description": "Issues, projects, and cycles in Linear.",
+      "transport": "sse",
+      "url": "https://mcp.linear.app/sse"
+    },
+    {
+      "id": "sentry",
+      "name": "Sentry",
+      "description": "Errors, issues, and performance data from Sentry.",
+      "transport": "http",
+      "url": "https://mcp.sentry.dev/mcp"
+    },
+    {
+      "id": "context7",
+      "name": "Context7",
+      "description": "Up-to-date documentation for thousands of libraries and frameworks.",
+      "transport": "http",
+      "url": "https://mcp.context7.com/mcp"
+    },
+    {
+      "id": "deepwiki",
+      "name": "DeepWiki",
+      "description": "Ask questions about any public GitHub repository.",
+      "transport": "http",
+      "url": "https://mcp.deepwiki.com/mcp"
+    },
+    {
+      "id": "stripe",
+      "name": "Stripe",
+      "description": "Customers, payments, and billing data. Authenticate with /mcp after installing.",
+      "transport": "http",
+      "url": "https://mcp.stripe.com"
+    },
+    {
+      "id": "hugging-face",
+      "name": "Hugging Face",
+      "description": "Search models, datasets, and papers on the Hugging Face Hub.",
+      "transport": "http",
+      "url": "https://huggingface.co/mcp"
+    },
+    {
+      "id": "cloudflare-docs",
+      "name": "Cloudflare Docs",
+      "description": "Search Cloudflare developer documentation.",
+      "transport": "sse",
+      "url": "https://docs.mcp.cloudflare.com/sse"
+    },
+    {
+      "id": "playwright",
+      "name": "Playwright",
+      "description": "Drive a real browser: navigate, click, fill forms, screenshot. Runs locally via npx.",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    },
+    {
+      "id": "memory",
+      "name": "Memory",
+      "description": "Persistent knowledge-graph memory across sessions. Runs locally via npx.",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
+    },
+    {
+      "id": "sequential-thinking",
+      "name": "Sequential Thinking",
+      "description": "Structured step-by-step reasoning tool. Runs locally via npx.",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    }
+  ],
+  "skills": [
+    {
+      "id": "docx",
+      "name": "Word documents",
+      "description": "Create and edit .docx files with tracked changes, comments, and formatting.",
+      "repo": "anthropics/skills",
+      "path": "skills/docx"
+    },
+    {
+      "id": "pdf",
+      "name": "PDF",
+      "description": "Fill forms, extract text, merge and split PDF files.",
+      "repo": "anthropics/skills",
+      "path": "skills/pdf"
+    },
+    {
+      "id": "pptx",
+      "name": "PowerPoint",
+      "description": "Create and edit .pptx presentations.",
+      "repo": "anthropics/skills",
+      "path": "skills/pptx"
+    },
+    {
+      "id": "xlsx",
+      "name": "Excel",
+      "description": "Create and edit .xlsx spreadsheets with formulas and charts.",
+      "repo": "anthropics/skills",
+      "path": "skills/xlsx"
+    },
+    {
+      "id": "canvas-design",
+      "name": "Canvas design",
+      "description": "Design posters, art, and visual layouts on an HTML canvas.",
+      "repo": "anthropics/skills",
+      "path": "skills/canvas-design"
+    },
+    {
+      "id": "frontend-design",
+      "name": "Frontend design",
+      "description": "Production-grade web interface design guidance.",
+      "repo": "anthropics/skills",
+      "path": "skills/frontend-design"
+    },
+    {
+      "id": "mcp-builder",
+      "name": "MCP builder",
+      "description": "Build your own MCP servers with best practices.",
+      "repo": "anthropics/skills",
+      "path": "skills/mcp-builder"
+    },
+    {
+      "id": "skill-creator",
+      "name": "Skill creator",
+      "description": "Create new Claude skills interactively.",
+      "repo": "anthropics/skills",
+      "path": "skills/skill-creator"
+    },
+    {
+      "id": "webapp-testing",
+      "name": "Webapp testing",
+      "description": "Test web applications with Playwright-driven flows.",
+      "repo": "anthropics/skills",
+      "path": "skills/webapp-testing"
+    },
+    {
+      "id": "theme-factory",
+      "name": "Theme factory",
+      "description": "Generate cohesive visual themes for artifacts and slides.",
+      "repo": "anthropics/skills",
+      "path": "skills/theme-factory"
+    }
+  ]
+}

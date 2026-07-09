@@ -8,13 +8,14 @@ import { listAgents } from './lib/agents.js'
 import { listConnectors, listPlugins } from './lib/connectors.js'
 import { usageReport } from './lib/usage.js'
 import { openStores } from './lib/store.js'
-import { launchRun, stopRun, readRunLog, runningCount } from './lib/runner.js'
+import { launchRun, stopRun, approveRun, denyRun, readRunLog, runningCount } from './lib/runner.js'
 import { startScheduler, nextRunTime, describeSchedule } from './lib/scheduler.js'
 import { sendChatMessage, chatBusy, chatHistory } from './lib/chat.js'
 import { gitStatus } from './lib/git.js'
 import { repoGithub, issueRunPrompt } from './lib/github.js'
 import { addConnector, removeConnector } from './lib/connectors.js'
 import { getSettings, updateSettings } from './lib/settings.js'
+import { catalogWithStatus, loadCatalog, installSkill, uninstallSkill } from './lib/catalog.js'
 import { sendNotification } from './lib/notify.js'
 import { randomBytes } from 'node:crypto'
 
@@ -234,7 +235,7 @@ async function handleApi(req, res, url, ctx) {
       })
       return json(res, 201, run)
     }
-    const runMatch = route.match(/^\/api\/runs\/([\w-]+)(\/log|\/stop)?$/)
+    const runMatch = route.match(/^\/api\/runs\/([\w-]+)(\/log|\/stop|\/approve|\/deny)?$/)
     if (runMatch) {
       const run = stores.runs.get(runMatch[1])
       if (!run) return json(res, 404, { error: 'Run not found' })
@@ -245,6 +246,12 @@ async function handleApi(req, res, url, ctx) {
       if (runMatch[2] === '/stop' && method === 'POST') {
         stopRun(stores, run.id)
         return json(res, 200, stores.runs.get(run.id))
+      }
+      if (runMatch[2] === '/approve' && method === 'POST') {
+        return json(res, 200, approveRun(stores, run.id))
+      }
+      if (runMatch[2] === '/deny' && method === 'POST') {
+        return json(res, 200, denyRun(stores, run.id))
       }
     }
 
@@ -297,6 +304,44 @@ async function handleApi(req, res, url, ctx) {
         model: body.model || 'sonnet',
       })
       return json(res, 201, run)
+    }
+
+    // ---------- catalog (one-click installs) ----------
+    if (route === '/api/catalog' && method === 'GET') {
+      return json(res, 200, await catalogWithStatus(claudeDir))
+    }
+    if (route === '/api/catalog/install' && method === 'POST') {
+      const body = await readBody(req)
+      const catalog = await loadCatalog()
+      if (body.kind === 'connector') {
+        const entry = catalog.connectors.find((c) => c.id === body.id)
+        if (!entry) return json(res, 404, { error: 'Unknown catalog connector' })
+        return json(res, 201, addConnector(claudeDir, {
+          name: entry.id,
+          transport: entry.transport,
+          url: entry.url,
+          command: entry.command,
+          args: entry.args,
+        }))
+      }
+      if (body.kind === 'skill') {
+        const entry = catalog.skills.find((s) => s.id === body.id)
+        if (!entry) return json(res, 404, { error: 'Unknown catalog skill' })
+        return json(res, 201, await installSkill(claudeDir, entry))
+      }
+      return json(res, 400, { error: 'kind must be connector or skill' })
+    }
+    if (route === '/api/catalog/uninstall' && method === 'POST') {
+      const body = await readBody(req)
+      if (body.kind === 'skill') {
+        uninstallSkill(claudeDir, String(body.id || ''))
+        return json(res, 200, { ok: true })
+      }
+      if (body.kind === 'connector') {
+        removeConnector(claudeDir, String(body.id || ''))
+        return json(res, 200, { ok: true })
+      }
+      return json(res, 400, { error: 'kind must be connector or skill' })
     }
 
     // ---------- connector management (explicit opt-in write) ----------
@@ -413,7 +458,9 @@ async function handleApi(req, res, url, ctx) {
 
     return json(res, 404, { error: 'Not found' })
   } catch (err) {
-    const status = /required|invalid|too large|does not exist|must be|already exists/i.test(err.message)
+    const status = /required|invalid|too large|does not exist|must be|already exists|no resumable session/i.test(
+      err.message
+    )
       ? 400
       : 500
     return json(res, status, { error: err.message })

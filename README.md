@@ -12,7 +12,7 @@
 npx claude-basecamp
 ```
 
-No install, no database, no config. Basecamp discovers the projects Claude Code already knows about and opens at `http://localhost:4747`.
+No install, no database, no config. Basecamp discovers the projects Claude Code already knows about and opens at `http://localhost:4747`. Runs on macOS, Linux, and Windows.
 
 ## What you can do
 
@@ -41,7 +41,9 @@ Managers remember everything across sessions — close the tab, come back tomorr
 
 **Command palette** — `Cmd+K` to jump to any repo's manager or fire any action.
 
-**Notifications** — Slack, Discord, Telegram, and macOS notifications when runs finish or fail. Configure them on the Settings page; Basecamp reaches you wherever you are.
+**Approval queue** — if a background run hits a permission wall it can't clear headlessly, it pauses as "awaiting approval" on Home with the requested command, instead of just failing. Approve to resume with that one action granted, or deny to stop it there.
+
+**Notifications** — Slack, Discord, Telegram, and native desktop notifications (macOS, Windows) when runs finish, fail, or need approval. Configure them on the Settings page; Basecamp reaches you wherever you are.
 
 **Incoming webhooks** — every routine has a secret URL. `curl -X POST` it from CI or a GitHub Action to trigger the routine ("build failed → Claude fixes it").
 
@@ -52,6 +54,8 @@ Managers remember everything across sessions — close the tab, come back tomorr
 **MCP server mode** — `claude mcp add basecamp -- npx claude-basecamp mcp` and every Claude Code session can check the digest, schedule routines, and launch runs through `basecamp_*` tools.
 
 **Connector management** — view every MCP server across your Claude config, and add or remove user-scope connectors from the dashboard (explicit opt-in write with automatic backup).
+
+**Catalog** — one-click installs for popular connectors (GitHub, Notion, Linear, Sentry, Context7, Playwright, and more) and official Anthropic skills (Word/Excel/PowerPoint/PDF, canvas design, MCP builder…). Community-curated via [catalog.json](catalog.json) — new entries reach every user without a release. Skill downloads are pinned to trusted repos with size caps and path guards.
 
 The UI is minimal black-and-white, GitHub-style, with no build step — and each manager keeps durable, human-readable notes in `BASECAMP.md` at the repo root.
 
@@ -89,7 +93,7 @@ This tool reads your Claude Code history and runs Claude unattended, so the secu
 
 ## Roadmap
 
-- [ ] Approval queue: runs pause on permission walls instead of being denied
+- [x] Approval queue: runs pause on permission walls instead of being denied
 - [ ] Cost guardrails: per-routine monthly budgets
 - [ ] One-click graphify export for token-heavy sessions
 

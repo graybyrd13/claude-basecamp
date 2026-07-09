@@ -1,7 +1,13 @@
 import { spawn } from 'node:child_process'
 import { getSettings } from './settings.js'
+import { lastPathSegment } from './paths.js'
 
 const FETCH_TIMEOUT_MS = 8000
+
+/** Quote a string as a single-quoted PowerShell literal (doubling embedded quotes). */
+function psQuote(s) {
+  return `'${String(s ?? '').replace(/'/g, "''")}'`
+}
 
 function post(url, body) {
   return fetch(url, {
@@ -59,6 +65,34 @@ export async function sendNotification(stores, { title, body }) {
       })
     )
   }
+  if (settings.macosNotifications && process.platform === 'win32') {
+    attempts.push(
+      new Promise((resolve) => {
+        // No extra Windows dependency (BurntToast etc.) is available in a
+        // zero-dependency tool, so use the .NET NotifyIcon balloon tip that
+        // ships with every Windows install instead of true WinRT toasts,
+        // which need a registered AppUserModelID to display reliably from an
+        // unpackaged script.
+        const script = [
+          'Add-Type -AssemblyName System.Windows.Forms,System.Drawing',
+          '$n = New-Object System.Windows.Forms.NotifyIcon',
+          '$n.Icon = [System.Drawing.SystemIcons]::Information',
+          '$n.Visible = $true',
+          `$n.BalloonTipTitle = ${psQuote(`Basecamp: ${title}`)}`,
+          `$n.BalloonTipText = ${psQuote(body || '')}`,
+          '$n.ShowBalloonTip(8000)',
+          'Start-Sleep -Seconds 1',
+          '$n.Dispose()',
+        ].join('; ')
+        const child = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
+          stdio: 'ignore',
+          windowsHide: true,
+        })
+        child.on('exit', (code) => resolve({ channel: 'windows', ok: code === 0 }))
+        child.on('error', (e) => resolve({ channel: 'windows', ok: false, error: e.message }))
+      })
+    )
+  }
 
   return Promise.all(attempts)
 }
@@ -69,9 +103,10 @@ export function notifyRunFinished(stores, run) {
   const settings = getSettings(stores)
   if (run.status === 'succeeded' && !settings.notifyOnSuccess) return
   const label = run.routineName ? `Routine "${run.routineName}"` : 'Task'
-  const repo = run.projectPath.split('/').filter(Boolean).pop()
+  const repo = lastPathSegment(run.projectPath)
+  const verb = run.status === 'succeeded' ? 'finished' : run.status === 'denied' ? 'was denied' : 'failed'
   sendNotification(stores, {
-    title: run.status === 'succeeded' ? `${label} finished in ${repo}` : `${label} failed in ${repo}`,
+    title: `${label} ${verb} in ${repo}`,
     body: (run.resultText || run.error || '').slice(0, 300),
   }).catch(() => {})
 }

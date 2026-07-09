@@ -36,6 +36,7 @@ const ICONS = {
   arrowUp: '<path fill="currentColor" d="M3.47 7.78a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0l4.25 4.25a.751.751 0 0 1-.018 1.042.751.751 0 0 1-1.042.018L9 4.81v8.44a.75.75 0 0 1-1.5 0V4.81L4.53 7.78a.75.75 0 0 1-1.06 0Z"/>',
   arrowDown: '<path fill="currentColor" d="M13.03 8.22a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.47 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L7.5 11.19V2.75a.75.75 0 0 1 1.5 0v8.44l2.97-2.97a.75.75 0 0 1 1.06 0Z"/>',
   terminal: '<path fill="currentColor" d="M0 2.75C0 1.784.784 1 1.75 1h12.5c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0 1 14.25 15H1.75A1.75 1.75 0 0 1 0 13.25Zm1.75-.25a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V2.75a.25.25 0 0 0-.25-.25ZM7.25 8a.749.749 0 0 1-.22.53l-2.25 2.25a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734L5.44 8 3.72 6.28a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215l2.25 2.25c.141.14.22.331.22.53Zm1.5 1.5h3a.75.75 0 0 1 0 1.5h-3a.75.75 0 0 1 0-1.5Z"/>',
+  plus: '<path fill="currentColor" d="M7.75 2a.75.75 0 0 1 .75.75V7h4.25a.75.75 0 0 1 0 1.5H8.5v4.25a.75.75 0 0 1-1.5 0V8.5H2.75a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2Z"/>',
 }
 
 /* ---------- helpers ---------- */
@@ -71,7 +72,21 @@ const fmtDuration = (start, end) => {
 }
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
-const repoName = (p) => String(p || '').split('/').filter(Boolean).pop() || p
+// Project paths are real filesystem paths — backslash-separated on Windows —
+// so split on either separator instead of assuming POSIX '/'.
+const repoName = (p) => String(p || '').split(/[\\/]/).filter(Boolean).pop() || p
+const describeDenials = (run) => {
+  const denials = run.permissionDenials || []
+  if (!denials.length) return 'Requested a permission this run does not have.'
+  return denials
+    .map((d) => {
+      const input = d.tool_input || {}
+      if (d.tool_name === 'Bash') return `Bash: ${input.command || ''}`.slice(0, 140)
+      if (input.file_path) return `${d.tool_name}: ${input.file_path}`
+      return d.tool_name
+    })
+    .join('; ')
+}
 const shortModel = (m) => m.replace(/^claude-/, '').replace(/-\d{8}$/, '')
 
 function md(text) {
@@ -100,6 +115,8 @@ const statusChip = (status) =>
     succeeded: `<span class="chip green">${icon('check', 12)}done</span>`,
     failed: `<span class="chip red">${icon('x', 12)}failed</span>`,
     stopped: `<span class="chip">stopped</span>`,
+    'awaiting-approval': `<span class="chip">${icon('clock', 12)}needs approval</span>`,
+    denied: `<span class="chip">denied</span>`,
   })[status] || `<span class="chip">${esc(status)}</span>`
 
 /** Animated count-up for stat numbers. */
@@ -450,6 +467,7 @@ async function renderHome() {
     api('/api/digest'),
   ])
   const running = runs.filter((r) => r.status === 'running')
+  const awaiting = runs.filter((r) => r.status === 'awaiting-approval')
   const upcoming = routines
     .filter((r) => r.enabled && r.nextRun)
     .sort((a, b) => a.nextRun - b.nextRun)
@@ -462,7 +480,7 @@ async function renderHome() {
       <div class="page-head">
         <div>
           <h1>${hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'}</h1>
-          <p class="subtitle">${overview.activeSessions.length} active session${overview.activeSessions.length === 1 ? '' : 's'} · ${running.length} background run${running.length === 1 ? '' : 's'} · ${routines.filter((r) => r.enabled).length} routine${routines.filter((r) => r.enabled).length === 1 ? '' : 's'} armed</p>
+          <p class="subtitle">${overview.activeSessions.length} active session${overview.activeSessions.length === 1 ? '' : 's'} · ${running.length} background run${running.length === 1 ? '' : 's'} · ${routines.filter((r) => r.enabled).length} routine${routines.filter((r) => r.enabled).length === 1 ? '' : 's'} armed${awaiting.length ? ` · ${awaiting.length} awaiting approval` : ''}</p>
         </div>
         <button class="btn primary" id="new-task">${icon('play', 14)}Run a task</button>
       </div>
@@ -489,6 +507,20 @@ async function renderHome() {
                 <div class="sub mono">${esc(r.prompt.slice(0, 100))}</div>
               </div>
               <span class="muted">${fmtDuration(r.startedAt)}</span>
+            </div>`).join('')}
+        </div>` : ''}
+
+      ${awaiting.length ? `
+        <div class="box">
+          <div class="box-head">${icon('stop', 14)} Awaiting approval <span class="count">${awaiting.length}</span></div>
+          ${awaiting.map((r) => `
+            <div class="row" data-run="${r.id}">
+              <div class="grow">
+                <div class="title">${esc(r.routineName || repoName(r.projectPath))}</div>
+                <div class="sub mono">${esc(describeDenials(r))}</div>
+              </div>
+              <button class="btn small" data-approve="${r.id}">Approve</button>
+              <button class="btn small danger" data-deny="${r.id}">Deny</button>
             </div>`).join('')}
         </div>` : ''}
 
@@ -534,6 +566,21 @@ async function renderHome() {
   )
   main.querySelectorAll('[data-run-link]').forEach((el) =>
     el.addEventListener('click', (e) => { e.preventDefault(); state.runId = el.dataset.runLink; go('runs') })
+  )
+  main.querySelectorAll('[data-approve]').forEach((el) =>
+    el.addEventListener('click', async (e) => {
+      e.stopPropagation()
+      await api(`/api/runs/${el.dataset.approve}/approve`, { method: 'POST' })
+      renderHome()
+    })
+  )
+  main.querySelectorAll('[data-deny]').forEach((el) =>
+    el.addEventListener('click', async (e) => {
+      e.stopPropagation()
+      if (!confirm('Deny this request? The run will stop here.')) return
+      await api(`/api/runs/${el.dataset.deny}/deny`, { method: 'POST' })
+      renderHome()
+    })
   )
 }
 
@@ -939,6 +986,7 @@ async function renderRuns() {
                 ${fmtTime(r.startedAt)}<br/>${fmtDuration(r.startedAt, r.endedAt)}${r.costUsd ? ` · $${r.costUsd.toFixed(2)}` : ''}
               </span>
               ${r.status === 'running' ? `<button class="btn small danger" data-stop="${r.id}">Stop</button>` : ''}
+              ${r.status === 'awaiting-approval' ? `<button class="btn small" data-approve="${r.id}">Approve</button><button class="btn small danger" data-deny="${r.id}">Deny</button>` : ''}
             </div>`).join('')}
         </div>` : '<div class="box"><div class="empty">No runs yet.</div></div>'}
       <div id="run-detail"></div>
@@ -948,6 +996,21 @@ async function renderRuns() {
     el.addEventListener('click', async (e) => {
       e.stopPropagation()
       await api(`/api/runs/${el.dataset.stop}/stop`, { method: 'POST' })
+      renderRuns()
+    })
+  )
+  main.querySelectorAll('[data-approve]').forEach((el) =>
+    el.addEventListener('click', async (e) => {
+      e.stopPropagation()
+      await api(`/api/runs/${el.dataset.approve}/approve`, { method: 'POST' })
+      renderRuns()
+    })
+  )
+  main.querySelectorAll('[data-deny]').forEach((el) =>
+    el.addEventListener('click', async (e) => {
+      e.stopPropagation()
+      if (!confirm('Deny this request? The run will stop here.')) return
+      await api(`/api/runs/${el.dataset.deny}/deny`, { method: 'POST' })
       renderRuns()
     })
   )
@@ -973,12 +1036,30 @@ async function renderRunDetail() {
         <p class="mono" style="margin:6px 0;color:var(--text-secondary)">${esc(run.prompt)}</p>
         ${(run.commits || []).length ? `<p style="margin:8px 0">${run.commits.map((c) => `<span class="chip mono">${icon('commit', 11)}${esc(c.sha)} ${esc(c.subject.slice(0, 50))}</span>`).join(' ')}</p>` : ''}
         ${run.resultText ? `<div class="box box-pad" style="margin:10px 0;background:var(--bg-subtle)"><div style="white-space:pre-wrap;font-size:13px">${esc(run.resultText)}</div></div>` : ''}
+        ${run.status === 'awaiting-approval' ? `
+          <div class="box box-pad" style="margin:10px 0">
+            <p><strong>Awaiting approval</strong></p>
+            <p class="mono" style="margin:6px 0">${esc(describeDenials(run))}</p>
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <button class="btn small" id="detail-approve">Approve</button>
+              <button class="btn small danger" id="detail-deny">Deny</button>
+            </div>
+          </div>` : ''}
         <p class="faint" style="font-size:12px;margin-top:8px">
           ${fmtDuration(run.startedAt, run.endedAt)}${run.numTurns ? ` · ${run.numTurns} turns` : ''}${run.costUsd ? ` · $${run.costUsd.toFixed(2)}` : ''}${run.error ? ` · <span style="color:var(--red)">${esc(run.error)}</span>` : ''}
         </p>
       </div>
       ${logData.log ? `<div class="log-view">${esc(logData.log)}</div>` : ''}
     `
+    $('#detail-approve')?.addEventListener('click', async () => {
+      await api(`/api/runs/${run.id}/approve`, { method: 'POST' })
+      renderRunDetail()
+    })
+    $('#detail-deny')?.addEventListener('click', async () => {
+      if (!confirm('Deny this request? The run will stop here.')) return
+      await api(`/api/runs/${run.id}/deny`, { method: 'POST' })
+      renderRunDetail()
+    })
     if (run.status === 'running') {
       clearTimeout(renderRunDetail._timer)
       renderRunDetail._timer = setTimeout(() => state.page === 'runs' && renderRunDetail(), 3000)
@@ -1220,6 +1301,73 @@ function openConnectorModal() {
   })
 }
 
+/* ---------- Catalog ---------- */
+
+async function renderCatalog() {
+  main.innerHTML = `
+    <div class="page">
+      <h1>Catalog</h1>
+      <p class="subtitle">One-click installs for popular connectors and skills. Community-curated — add entries via <a href="https://github.com/graybyrd13/claude-basecamp/blob/main/catalog.json" target="_blank" rel="noopener">catalog.json</a>.</p>
+      <div id="catalog-body"><div class="empty">Loading catalog…</div></div>
+    </div>`
+  const body = $('#catalog-body')
+  try {
+    const { connectors, skills } = await api('/api/catalog')
+    body.innerHTML = `
+      <h2>Connectors (MCP servers)</h2>
+      <p class="muted" style="font-size:12.5px;margin-bottom:8px">Installed into <span class="mono">~/.claude.json</span> (user scope, backed up first). Remote connectors may ask you to authenticate with <span class="mono">/mcp</span> in a Claude session afterwards.</p>
+      <div class="box">${connectors.map((c) => catalogRow(c, 'connector')).join('')}</div>
+      <h2>Skills</h2>
+      <p class="muted" style="font-size:12.5px;margin-bottom:8px">Downloaded from <span class="mono">anthropics/skills</span> into <span class="mono">~/.claude/skills/</span>. Available in every Claude Code session immediately.</p>
+      <div class="box">${skills.map((s) => catalogRow(s, 'skill')).join('')}</div>
+    `
+    body.querySelectorAll('[data-install]').forEach((btn) =>
+      btn.addEventListener('click', () => catalogAction(btn, 'install'))
+    )
+    body.querySelectorAll('[data-uninstall]').forEach((btn) =>
+      btn.addEventListener('click', () => catalogAction(btn, 'uninstall'))
+    )
+  } catch (err) {
+    body.innerHTML = `<div class="empty">${esc(err.message)}</div>`
+  }
+}
+
+function catalogRow(entry, kind) {
+  return `
+    <div class="row">
+      <span style="color:var(--muted)">${icon(kind === 'connector' ? 'gear' : 'repo', 15)}</span>
+      <div class="grow">
+        <div class="title">${esc(entry.name)}
+          ${entry.transport ? `<span class="chip">${esc(entry.transport)}</span>` : ''}
+          ${entry.installed ? '<span class="chip green">installed</span>' : ''}
+        </div>
+        <div class="sub">${esc(entry.description)}</div>
+      </div>
+      ${entry.installed
+        ? `<button class="btn small danger" data-uninstall="${esc(entry.id)}" data-kind="${kind}">Remove</button>`
+        : `<button class="btn small primary" data-install="${esc(entry.id)}" data-kind="${kind}">Install</button>`}
+    </div>`
+}
+
+async function catalogAction(btn, action) {
+  const id = btn.dataset.install || btn.dataset.uninstall
+  const kind = btn.dataset.kind
+  if (action === 'install' && kind === 'connector' &&
+      !confirm(`Install the "${id}" connector? This writes to ~/.claude.json (a backup is kept).`)) return
+  if (action === 'uninstall' &&
+      !confirm(`Remove "${id}"?`)) return
+  btn.disabled = true
+  btn.textContent = action === 'install' ? 'Installing…' : 'Removing…'
+  try {
+    await api(`/api/catalog/${action}`, { method: 'POST', body: { kind, id } })
+    renderCatalog()
+  } catch (err) {
+    btn.disabled = false
+    btn.textContent = action === 'install' ? 'Install' : 'Remove'
+    alert(err.message)
+  }
+}
+
 /* ---------- Settings ---------- */
 
 async function renderSettings() {
@@ -1246,7 +1394,7 @@ async function renderSettings() {
           </div>
           <label class="field" style="display:flex;align-items:center;gap:8px;font-weight:500">
             <input type="checkbox" name="macosNotifications" style="width:auto;margin:0" ${s.macosNotifications ? 'checked' : ''} />
-            macOS notifications
+            Desktop notifications (macOS or Windows)
           </label>
           <label class="field" style="display:flex;align-items:center;gap:8px;font-weight:500">
             <input type="checkbox" name="notifyOnSuccess" style="width:auto;margin:0" ${s.notifyOnSuccess ? 'checked' : ''} />
@@ -1332,6 +1480,7 @@ async function openPalette() {
     { label: 'Routines', hint: 'go to', iconName: 'sync', keywords: 'routines schedule', action: () => go('routines') },
     { label: 'Runs', hint: 'go to', iconName: 'terminal', keywords: 'runs tasks background', action: () => go('runs') },
     { label: 'Stats', hint: 'go to', iconName: 'graph', keywords: 'stats usage tokens activity', action: () => go('stats') },
+    { label: 'Catalog', hint: 'go to', iconName: 'plus', keywords: 'catalog install connectors skills mcp marketplace', action: () => go('catalog') },
     { label: 'Settings', hint: 'go to', iconName: 'gear', keywords: 'settings notifications slack discord telegram webhooks', action: () => go('settings') },
   ]
   renderPaletteList('')
@@ -1400,6 +1549,7 @@ const pages = {
   routines: renderRoutines,
   runs: renderRuns,
   stats: renderStats,
+  catalog: renderCatalog,
   settings: renderSettings,
   hq: renderHQ,
 }
@@ -1410,6 +1560,7 @@ const NAV = [
   { page: 'routines', label: 'Routines', iconName: 'sync' },
   { page: 'runs', label: 'Runs', iconName: 'terminal' },
   { page: 'stats', label: 'Stats', iconName: 'graph' },
+  { page: 'catalog', label: 'Catalog', iconName: 'plus' },
   { page: 'settings', label: 'Settings', iconName: 'gear' },
 ]
 

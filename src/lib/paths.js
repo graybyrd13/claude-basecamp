@@ -32,7 +32,21 @@ export function claudeJsonPath(claudeDir) {
  * Decode a Claude project directory name back to a filesystem path.
  * Claude encodes "/Users/gray/my-app" as "-Users-gray-my-app".
  * The encoding is lossy (both "/" and "-" become "-"), so this is best-effort.
+ * This always decodes to "/"-joined form: it reflects however Claude Code
+ * itself encoded the path, not the OS Basecamp happens to be running on.
  */
 export function decodeProjectDirName(name) {
   return name.replace(/-/g, '/')
+}
+
+/**
+ * Last segment of a real filesystem path, tolerant of both "/" and "\"
+ * separators. Project paths shown in notifications, run titles, and the UI
+ * come straight from the local OS (POSIX or Windows), so a hardcoded
+ * single-separator split silently returns the whole path unchanged on the
+ * other platform instead of just the repo name.
+ */
+export function lastPathSegment(p) {
+  const str = String(p || '')
+  return str.split(/[\\/]/).filter(Boolean).pop() || str
 }

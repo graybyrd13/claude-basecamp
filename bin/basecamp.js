@@ -43,12 +43,20 @@ function parseArgs(argv) {
 }
 
 function openBrowser(url) {
-  const cmd =
-    process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open'
-  spawn(cmd, [url], { shell: process.platform === 'win32', stdio: 'ignore', detached: true }).on(
-    'error',
-    () => {}
-  )
+  if (process.platform === 'win32') {
+    // `start` is a cmd.exe builtin, not an executable on PATH, so it needs a
+    // shell. It also needs an explicit empty title argument — without one,
+    // `start <url>` can be parsed as `start "<url>"` with the url treated as
+    // a window title instead of the thing to open.
+    spawn('cmd', ['/c', 'start', '""', url], {
+      stdio: 'ignore',
+      detached: true,
+      windowsHide: true,
+    }).on('error', () => {})
+    return
+  }
+  const cmd = process.platform === 'darwin' ? 'open' : 'xdg-open'
+  spawn(cmd, [url], { stdio: 'ignore', detached: true }).on('error', () => {})
 }
 
 if (process.argv[2] === 'mcp') {

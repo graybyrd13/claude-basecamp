@@ -19,6 +19,18 @@ async function withServer(t) {
   return base
 }
 
+/** Like withServer, but also hands back the store so a test can seed a run directly. */
+async function withServerAndStores(t) {
+  const basecampHome = mkdtempSync(join(tmpdir(), 'basecamp-server-test-'))
+  const { server, stores } = await startServer({ port: 0, claudeDir: FIXTURE_DIR, basecampHome })
+  const base = `http://127.0.0.1:${server.address().port}`
+  t.after(() => {
+    server.close()
+    rmSync(basecampHome, { recursive: true, force: true })
+  })
+  return { base, stores }
+}
+
 test('serves dashboard and read-only API endpoints', async (t) => {
   const base = await withServer(t)
 
@@ -240,4 +252,46 @@ test('run launch validates project path before spawning', async (t) => {
   })
   assert.equal(res.status, 400)
   assert.match((await res.json()).error, /does not exist/)
+})
+
+test('approve/deny endpoints 404 for unknown run ids', async (t) => {
+  const base = await withServer(t)
+  assert.equal((await fetch(`${base}/api/runs/nope/approve`, { method: 'POST' })).status, 404)
+  assert.equal((await fetch(`${base}/api/runs/nope/deny`, { method: 'POST' })).status, 404)
+})
+
+test('deny endpoint transitions an awaiting-approval run to denied over HTTP', async (t) => {
+  const { base, stores } = await withServerAndStores(t)
+  // Seeded directly in the store: there's no HTTP-only way to get a run into
+  // awaiting-approval without a real `claude` binary on PATH. The state
+  // machine itself (denial detection, resume args, rejecting bad transitions)
+  // is covered against a fake spawn in test/runner.test.js — this just checks
+  // the route wiring.
+  const run = stores.runs.insert({
+    projectPath: '/tmp/some-project',
+    prompt: 'do a thing',
+    status: 'awaiting-approval',
+    sessionId: 'sess-x',
+    permissionDenials: [{ tool_name: 'Bash', tool_input: { command: 'rm -rf x' } }],
+  })
+
+  const res = await fetch(`${base}/api/runs/${run.id}/deny`, { method: 'POST' })
+  assert.equal(res.status, 200)
+  const denied = await res.json()
+  assert.equal(denied.status, 'denied')
+
+  const updates = await (await fetch(`${base}/api/updates`)).json()
+  assert.equal(updates[0].kind, 'run-denied')
+
+  // Denying twice is rejected — it's no longer awaiting approval.
+  const second = await fetch(`${base}/api/runs/${run.id}/deny`, { method: 'POST' })
+  assert.equal(second.status, 400)
+})
+
+test('approve endpoint rejects a run that is not awaiting approval', async (t) => {
+  const { base, stores } = await withServerAndStores(t)
+  const run = stores.runs.insert({ projectPath: '/tmp/some-project', prompt: 'x', status: 'succeeded' })
+  const res = await fetch(`${base}/api/runs/${run.id}/approve`, { method: 'POST' })
+  assert.equal(res.status, 400)
+  assert.match((await res.json()).error, /awaiting approval/)
 })

@@ -90,6 +90,9 @@ export function sendChatMessage(stores, { projectPath, message, port }, onEvent)
     cwd: projectPath,
     env: sanitizedEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
+    // npm-installed `claude` resolves to a .cmd/.ps1 shim on Windows, which
+    // needs a shell to execute — see the identical note in runner.js.
+    shell: process.platform === 'win32',
   })
   liveChats.set(projectPath, child)
 
@@ -172,7 +175,9 @@ export function sendChatMessage(stores, { projectPath, message, port }, onEvent)
 function toolDetail(part) {
   const input = part.input || {}
   if (part.name === 'Bash') return String(input.command || '').slice(0, 80)
-  if (input.file_path) return String(input.file_path).split('/').slice(-2).join('/')
+  // Split on either separator: file_path is a real filesystem path and may
+  // be backslash-separated on Windows.
+  if (input.file_path) return String(input.file_path).split(/[\\/]/).slice(-2).join('/')
   if (input.pattern) return String(input.pattern).slice(0, 60)
   return null
 }
