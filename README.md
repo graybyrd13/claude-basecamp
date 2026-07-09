@@ -76,6 +76,17 @@ Basecamp's own state (routines, runs, goals, chat history) lives in `~/.claude-b
 
 Zero runtime dependencies. Node 18+ and an installed [Claude Code](https://claude.com/claude-code).
 
+## Security
+
+This tool reads your Claude Code history and runs Claude unattended, so the security posture is deliberately simple enough to verify yourself:
+
+- **Zero dependencies.** No supply chain. The entire codebase is ~4,000 lines of plain Node and vanilla JS — auditable in one sitting.
+- **Local only.** The server binds `127.0.0.1` and nothing is ever sent off your machine. There is no telemetry, no analytics, no phone-home.
+- **Read-only on Claude's data.** Transcripts and config are never modified, with one exception: adding/removing MCP connectors from the UI, which requires explicit confirmation and creates a backup of `~/.claude.json` first.
+- **CSRF-guarded.** Mutating endpoints reject requests whose `Origin` doesn't match, so a malicious website can't drive your Basecamp. Routine webhooks use unguessable per-routine tokens.
+- **Sandboxed by Claude Code's own permissions.** Background runs use Claude Code permission modes (`plan` / `acceptEdits` / etc.) — Basecamp never grants Claude anything your CLI wouldn't.
+- **Public domain.** No license gymnastics; fork it, audit it, vendor it.
+
 ## Roadmap
 
 - [ ] Approval queue: runs pause on permission walls instead of being denied
