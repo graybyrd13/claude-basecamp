@@ -37,6 +37,7 @@ const ICONS = {
   arrowDown: '<path fill="currentColor" d="M13.03 8.22a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.47 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L7.5 11.19V2.75a.75.75 0 0 1 1.5 0v8.44l2.97-2.97a.75.75 0 0 1 1.06 0Z"/>',
   terminal: '<path fill="currentColor" d="M0 2.75C0 1.784.784 1 1.75 1h12.5c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0 1 14.25 15H1.75A1.75 1.75 0 0 1 0 13.25Zm1.75-.25a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V2.75a.25.25 0 0 0-.25-.25ZM7.25 8a.749.749 0 0 1-.22.53l-2.25 2.25a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734L5.44 8 3.72 6.28a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215l2.25 2.25c.141.14.22.331.22.53Zm1.5 1.5h3a.75.75 0 0 1 0 1.5h-3a.75.75 0 0 1 0-1.5Z"/>',
   plus: '<path fill="currentColor" d="M7.75 2a.75.75 0 0 1 .75.75V7h4.25a.75.75 0 0 1 0 1.5H8.5v4.25a.75.75 0 0 1-1.5 0V8.5H2.75a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2Z"/>',
+  shield: '<path fill="currentColor" d="M7.467.133a1.748 1.748 0 0 1 1.066 0l5.25 1.68A1.75 1.75 0 0 1 15 3.48V7c0 1.566-.32 3.182-1.303 4.682-.983 1.498-2.585 2.813-5.032 3.855a1.697 1.697 0 0 1-1.33 0c-2.447-1.042-4.049-2.357-5.032-3.855C1.32 10.182 1 8.566 1 7V3.48a1.75 1.75 0 0 1 1.217-1.667Zm.61 1.429a.25.25 0 0 0-.153 0l-5.25 1.68a.25.25 0 0 0-.174.238V7c0 1.358.275 2.666 1.057 3.86.784 1.194 2.121 2.34 4.366 3.297a.196.196 0 0 0 .154 0c2.245-.956 3.582-2.104 4.366-3.298C13.225 9.666 13.5 8.36 13.5 7V3.48a.251.251 0 0 0-.174-.237l-5.25-1.68ZM8 5a.75.75 0 0 1 .75.75v1.5h1.5a.75.75 0 0 1 0 1.5h-1.5v1.5a.75.75 0 0 1-1.5 0v-1.5h-1.5a.75.75 0 0 1 0-1.5h1.5v-1.5A.75.75 0 0 1 8 5Z"/>',
   pulse: '<path fill="currentColor" d="M6 2c.353 0 .66.246.735.591L8.6 11.19l1.166-3.5A.75.75 0 0 1 10.48 7.2h4.77a.75.75 0 0 1 0 1.5h-4.229l-1.81 5.428a.75.75 0 0 1-1.446-.046L5.9 5.51l-1.168 4.09A.75.75 0 0 1 4.01 10.15H.75a.75.75 0 0 1 0-1.5h2.696l1.82-6.104A.75.75 0 0 1 6 2Z"/>',
 }
 
@@ -1574,6 +1575,100 @@ async function openIntentModal(presetRepo = null) {
   })
 }
 
+/* ---------- Reflexes (the immune system) ---------- */
+
+async function renderReflexes() {
+  main.innerHTML = '<div class="page"><h1>Reflexes</h1><p class="subtitle">Loading immune memory…</p></div>'
+  const [stats, antibodies] = await Promise.all([
+    api('/api/reflex/stats'),
+    api('/api/reflex/antibodies'),
+  ])
+  main.innerHTML = `
+    <div class="page">
+      <div class="page-head">
+        <div><h1>Reflexes</h1><p class="subtitle">Basecamp mines every session for moments you pushed back, turns them into antibodies, and blocks the same mistake machine-wide — in any session, before it happens.</p></div>
+        <span style="display:flex;gap:8px">
+          <button class="btn" id="rescan">Scan history</button>
+          ${stats.hookInstalled
+            ? '<button class="btn danger" id="disarm">Disarm</button>'
+            : '<button class="btn primary" id="arm">Arm reflexes</button>'}
+        </span>
+      </div>
+
+      ${!stats.hookInstalled ? `
+        <div class="digest" style="border-left-color:var(--attention)">
+          <div class="d-head">${icon('shield', 15)} Reflexes are not armed</div>
+          <div class="muted" style="font-size:13px">Arming installs a PreToolUse hook in <span class="mono">~/.claude/settings.json</span> (one-time backup kept) so every Claude session on this machine consults the immune memory before Bash/Write/Edit actions. If Basecamp isn't running, sessions behave completely normally.</div>
+        </div>` : ''}
+
+      <div class="cards">
+        <div class="card"><div class="num" data-count="${stats.antibodies}">0</div><div class="label">antibodies</div></div>
+        <div class="card"><div class="num" data-count="${stats.exposures}">0</div><div class="label">exposures learned from</div></div>
+        <div class="card"><div class="num" data-count="${stats.checks}">0</div><div class="label">actions checked</div></div>
+        <div class="card"><div class="num" style="color:${stats.blocks ? 'var(--green)' : 'inherit'}" data-count="${stats.blocks}">0</div><div class="label">mistakes prevented</div></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:22px">
+        <div class="box">
+          <div class="box-head">${icon('chat', 14)} What Claude needs from you</div>
+          ${stats.claudeNeeds.map((n) => `<div class="row"><div class="grow" style="font-size:13px">${esc(n)}</div></div>`).join('')}
+        </div>
+        <div class="box">
+          <div class="box-head">${icon('shield', 14)} What to watch in Claude</div>
+          ${stats.userNeeds.map((n) => `<div class="row"><div class="grow" style="font-size:13px">${esc(n)}</div></div>`).join('')}
+        </div>
+      </div>
+
+      <h2>Immune memory</h2>
+      ${antibodies.length ? `
+        <div class="box">
+          ${antibodies.slice(0, 30).map((a) => `
+            <div class="row" style="${a.muted ? 'opacity:0.5' : ''}">
+              <div class="grow">
+                <div class="title"><span class="mono">${esc(a.pattern.match)}</span>
+                  <span class="chip">${esc(a.pattern.tool)}</span>
+                  <span class="chip ${a.count >= 2 && !a.muted ? 'green' : ''}">${a.count >= 2 && !a.muted ? 'blocking' : 'observing'}</span>
+                  <span class="chip solid">${a.count}×</span>
+                </div>
+                <div class="sub">${esc((a.evidence[a.evidence.length - 1]?.quote || '').slice(0, 90))} · ${esc(a.kinds.join(', '))} · last ${fmtTime(a.lastSeen)}</div>
+              </div>
+              <button class="btn small" data-mute="${a.id}" data-muted="${a.muted}">${a.muted ? 'Unmute' : 'Mute'}</button>
+              <button class="btn small danger" data-del-ab="${a.id}">${icon('x', 12)}</button>
+            </div>`).join('')}
+        </div>` : '<div class="box"><div class="empty">No antibodies yet — hit "Scan history" to mine your transcripts.</div></div>'}
+    </div>`
+
+  animateCards(main)
+  $('#rescan')?.addEventListener('click', async (e) => {
+    e.target.disabled = true
+    e.target.textContent = 'Scanning…'
+    const result = await api('/api/reflex/scan', { method: 'POST' })
+    alert(`Scan complete: ${result.newSignals} new signals, ${result.antibodies} antibodies total`)
+    renderReflexes()
+  })
+  $('#arm')?.addEventListener('click', async () => {
+    if (!confirm('Install the reflex hook into ~/.claude/settings.json? A one-time backup is kept, and it is fully removable with Disarm.')) return
+    await api('/api/reflex/install', { method: 'POST' })
+    renderReflexes()
+  })
+  $('#disarm')?.addEventListener('click', async () => {
+    await api('/api/reflex/uninstall', { method: 'POST' })
+    renderReflexes()
+  })
+  main.querySelectorAll('[data-mute]').forEach((el) =>
+    el.addEventListener('click', async () => {
+      await api(`/api/reflex/antibodies/${el.dataset.mute}`, { method: 'PUT', body: { muted: el.dataset.muted !== 'true' } })
+      renderReflexes()
+    })
+  )
+  main.querySelectorAll('[data-del-ab]').forEach((el) =>
+    el.addEventListener('click', async () => {
+      await api(`/api/reflex/antibodies/${el.dataset.delAb}`, { method: 'DELETE' })
+      renderReflexes()
+    })
+  )
+}
+
 /* ---------- Catalog ---------- */
 
 async function renderCatalog() {
@@ -1755,6 +1850,7 @@ async function openPalette() {
     { label: 'Runs', hint: 'go to', iconName: 'terminal', keywords: 'runs tasks background', action: () => go('runs') },
     { label: 'Stats', hint: 'go to', iconName: 'graph', keywords: 'stats usage tokens activity', action: () => go('stats') },
     { label: 'Checks', hint: 'go to', iconName: 'pulse', keywords: 'checks intents reconcile desired state decisions', action: () => go('intents') },
+    { label: 'Reflexes', hint: 'go to', iconName: 'shield', keywords: 'reflexes immune antibodies mistakes blocked guardian', action: () => go('reflexes') },
     { label: 'New check', hint: 'command', iconName: 'pulse', keywords: 'check declare new desired state', action: () => openIntentModal() },
     { label: 'Catalog', hint: 'go to', iconName: 'plus', keywords: 'catalog install connectors skills mcp marketplace', action: () => go('catalog') },
     { label: 'Settings', hint: 'go to', iconName: 'gear', keywords: 'settings notifications slack discord telegram webhooks', action: () => go('settings') },
@@ -1824,6 +1920,7 @@ const pages = {
   home: renderHome,
   repos: renderRepos,
   intents: renderIntents,
+  reflexes: renderReflexes,
   routines: renderRoutines,
   runs: renderRuns,
   stats: renderStats,
@@ -1837,6 +1934,7 @@ const NAV = [
   { page: 'home', label: 'Home', iconName: 'home' },
   { page: 'repos', label: 'Repositories', iconName: 'repo' },
   { page: 'intents', label: 'Checks', iconName: 'pulse' },
+  { page: 'reflexes', label: 'Reflexes', iconName: 'shield' },
   { page: 'routines', label: 'Routines', iconName: 'sync' },
   { page: 'runs', label: 'Runs', iconName: 'terminal' },
   { page: 'stats', label: 'Stats', iconName: 'graph' },

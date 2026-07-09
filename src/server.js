@@ -19,6 +19,8 @@ import { getSettings, updateSettings } from './lib/settings.js'
 import { catalogWithStatus, loadCatalog, installSkill, uninstallSkill } from './lib/catalog.js'
 import { findRescueCandidates, rescuePrompt, validateRescueTarget } from './lib/rescue.js'
 import { BUILTINS, reconcileIntent, intentReport, startReconciler } from './lib/reconcile.js'
+import { mineAntibodies, reflexVerdict, immuneStats, bumpCounters } from './lib/immune.js'
+import { installReflexHook, uninstallReflexHook, reflexHookInstalled } from './lib/hook-installer.js'
 import { sendNotification } from './lib/notify.js'
 import { randomBytes } from 'node:crypto'
 
@@ -375,6 +377,59 @@ async function handleApi(req, res, url, ctx) {
         stores.intents.remove(intent.id)
         return json(res, 200, { ok: true })
       }
+    }
+
+    // ---------- immune system (reflexes) ----------
+    if (route === '/api/reflex/hook' && method === 'POST') {
+      // Called by the PreToolUse hook of every Claude session on this machine.
+      const body = await readBody(req).catch(() => ({}))
+      const verdict = reflexVerdict(stores, {
+        toolName: body.tool_name,
+        toolInput: body.tool_input,
+      })
+      bumpCounters(stores, { blocked: verdict.decision === 'deny' })
+      if (verdict.decision !== 'deny') return json(res, 200, {})
+      stores.updates.insert({
+        kind: 'reflex-block',
+        projectPath: body.cwd || null,
+        title: `Reflex blocked "${(body.tool_input?.command || body.tool_input?.file_path || body.tool_name || '').toString().slice(0, 60)}"`,
+        body: verdict.reason,
+      })
+      return json(res, 200, {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: verdict.reason,
+        },
+      })
+    }
+    if (route === '/api/reflex/scan' && method === 'POST') {
+      return json(res, 200, await mineAntibodies(claudeDir, stores))
+    }
+    if (route === '/api/reflex/stats' && method === 'GET') {
+      return json(res, 200, { ...immuneStats(stores), hookInstalled: reflexHookInstalled(claudeDir) })
+    }
+    if (route === '/api/reflex/antibodies' && method === 'GET') {
+      return json(res, 200, stores.antibodies.list().sort((a, b) => b.count - a.count))
+    }
+    const antibodyMatch = route.match(/^\/api\/reflex\/antibodies\/([\w-]+)$/)
+    if (antibodyMatch) {
+      const antibody = stores.antibodies.get(antibodyMatch[1])
+      if (!antibody) return json(res, 404, { error: 'Antibody not found' })
+      if (method === 'PUT') {
+        const body = await readBody(req)
+        return json(res, 200, stores.antibodies.update(antibody.id, { muted: Boolean(body.muted) }))
+      }
+      if (method === 'DELETE') {
+        stores.antibodies.remove(antibody.id)
+        return json(res, 200, { ok: true })
+      }
+    }
+    if (route === '/api/reflex/install' && method === 'POST') {
+      return json(res, 200, installReflexHook(claudeDir, ctx.port))
+    }
+    if (route === '/api/reflex/uninstall' && method === 'POST') {
+      return json(res, 200, uninstallReflexHook(claudeDir))
     }
 
     // ---------- session rescue ----------
