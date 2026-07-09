@@ -65,12 +65,11 @@ Zero runtime dependencies. Node 18+ and an installed [Claude Code](https://claud
 - [ ] One-click graphify export for token-heavy sessions
 - [ ] GitHub bridge: link runs to the PRs/issues they produced
 - [ ] Connector enable/disable from the dashboard
-- [ ] Cost budgets per routine
 
 ## Development
 
 ```bash
-git clone https://github.com/graysonheim/claude-basecamp
+git clone https://github.com/graybyrd13/claude-basecamp
 cd claude-basecamp
 npm test        # node:test, zero deps
 npm run dev     # start without opening a browser

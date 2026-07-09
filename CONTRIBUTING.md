@@ -12,7 +12,7 @@ Thanks for helping! The project is intentionally simple: **zero runtime dependen
 ## Setup
 
 ```bash
-git clone https://github.com/graysonheim/claude-basecamp
+git clone https://github.com/graybyrd13/claude-basecamp
 cd claude-basecamp
 npm test
 npm run dev
