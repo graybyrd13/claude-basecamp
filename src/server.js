@@ -1,5 +1,6 @@
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join, extname, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { listProjects, listSessions, summarizeSession } from './lib/sessions.js'
@@ -17,6 +18,7 @@ import { addConnector, removeConnector } from './lib/connectors.js'
 import { getSettings, updateSettings } from './lib/settings.js'
 import { catalogWithStatus, loadCatalog, installSkill, uninstallSkill } from './lib/catalog.js'
 import { findRescueCandidates, rescuePrompt, validateRescueTarget } from './lib/rescue.js'
+import { BUILTINS, reconcileIntent, intentReport, startReconciler } from './lib/reconcile.js'
 import { sendNotification } from './lib/notify.js'
 import { randomBytes } from 'node:crypto'
 
@@ -307,6 +309,74 @@ async function handleApi(req, res, url, ctx) {
       return json(res, 201, run)
     }
 
+    // ---------- intents (the reconciliation loop) ----------
+    if (route === '/api/intents' && method === 'GET') {
+      const project = url.searchParams.get('project')
+      const intents = stores.intents.list()
+      return json(res, 200, project ? intents.filter((i) => i.projectPath === project) : intents)
+    }
+    if (route === '/api/intents/report' && method === 'GET') {
+      return json(res, 200, intentReport(stores))
+    }
+    if (route === '/api/intents' && method === 'POST') {
+      const body = await readBody(req)
+      if (!body.projectPath || !existsSync(body.projectPath)) {
+        return json(res, 400, { error: 'A valid projectPath is required' })
+      }
+      const builtin = body.builtin || null
+      if (builtin && !BUILTINS[builtin]) return json(res, 400, { error: `Unknown builtin: ${builtin}` })
+      if (!builtin && !body.text?.trim()) return json(res, 400, { error: 'text is required for custom intents' })
+      const intent = stores.intents.insert({
+        projectPath: body.projectPath,
+        builtin,
+        text: builtin ? null : String(body.text).trim(),
+        label: builtin ? BUILTINS[builtin].label : String(body.text).trim().slice(0, 80),
+        intervalMinutes: Math.max(Number(body.intervalMinutes) || 120, 15),
+        model: body.model || null,
+        enabled: true,
+        lastCheck: null,
+        lastStatus: null,
+        lastDetail: null,
+        lastRunId: null,
+        failStreak: 0,
+      })
+      return json(res, 201, intent)
+    }
+    const intentMatch = route.match(/^\/api\/intents\/([\w-]+)(\/reconcile|\/decide)?$/)
+    if (intentMatch && intentMatch[1] !== 'report') {
+      const intent = stores.intents.get(intentMatch[1])
+      if (!intent) return json(res, 404, { error: 'Intent not found' })
+      if (intentMatch[2] === '/reconcile' && method === 'POST') {
+        return json(res, 200, await reconcileIntent(stores, intent))
+      }
+      if (intentMatch[2] === '/decide' && method === 'POST') {
+        const body = await readBody(req)
+        if (!body.decision?.trim()) return json(res, 400, { error: 'decision text is required' })
+        const run = launchRun(stores, {
+          projectPath: intent.projectPath,
+          prompt: `Standing intent: "${intent.label}"\nIt needed a human decision: ${intent.lastDetail}\n\nThe owner has decided: "${body.decision.trim()}"\n\nCarry out this decision, verify the intent holds afterwards, and commit your work with clear messages.`,
+          permissionMode: 'acceptEdits',
+          model: intent.model || 'sonnet',
+          routineName: `Intent: ${intent.label}`,
+          intentId: intent.id,
+        })
+        stores.intents.update(intent.id, { lastStatus: 'converging', lastRunId: run.id, failStreak: 0 })
+        return json(res, 201, run)
+      }
+      if (method === 'PUT') {
+        const body = await readBody(req)
+        const allowed = {}
+        if ('enabled' in body) allowed.enabled = Boolean(body.enabled)
+        if ('intervalMinutes' in body) allowed.intervalMinutes = Math.max(Number(body.intervalMinutes) || 120, 15)
+        if ('model' in body) allowed.model = body.model || null
+        return json(res, 200, stores.intents.update(intent.id, allowed))
+      }
+      if (method === 'DELETE') {
+        stores.intents.remove(intent.id)
+        return json(res, 200, { ok: true })
+      }
+    }
+
     // ---------- session rescue ----------
     if (route === '/api/rescue' && method === 'GET') {
       return json(res, 200, await findRescueCandidates(claudeDir, stores))
@@ -512,6 +582,7 @@ export function startServer({ port, claudeDir, host = '127.0.0.1', basecampHome 
   const stores = openStores(basecampHome)
   const ctx = { claudeDir, stores, port }
   startScheduler(stores)
+  startReconciler(stores)
 
   // Backfill webhook tokens for routines created before webhooks existed.
   for (const routine of stores.routines.list()) {

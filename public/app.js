@@ -460,13 +460,15 @@ function gitChips(git) {
 /* ---------- Home ---------- */
 
 async function renderHome() {
-  const [overview, updates, runs, routines, digest, rescue] = await Promise.all([
+  const [overview, updates, runs, routines, digest, rescue, report, intents] = await Promise.all([
     api('/api/overview'),
     api('/api/updates'),
     api('/api/runs'),
     api('/api/routines'),
     api('/api/digest'),
     api('/api/rescue').catch(() => []),
+    api('/api/intents/report').catch(() => null),
+    api('/api/intents').catch(() => []),
   ])
   const running = runs.filter((r) => r.status === 'running')
   const awaiting = runs.filter((r) => r.status === 'awaiting-approval')
@@ -486,6 +488,25 @@ async function renderHome() {
         </div>
         <button class="btn primary" id="new-task">${icon('play', 14)}Run a task</button>
       </div>
+
+      ${report && report.total > 0 ? `
+        <div class="digest" style="border-left-color:${report.decisions.length ? 'var(--red)' : report.drifting ? 'var(--attention)' : 'var(--green)'}">
+          <div class="d-head">${icon('pulse', 15)} Convergence
+            <span class="muted" style="font-weight:400">
+              ${report.holding} holding${report.converging ? ` · ${report.converging} converging` : ''}${report.drifting ? ` · ${report.drifting} drifting` : ''}${report.unknown ? ` · ${report.unknown} unknown` : ''}
+            </span>
+            <button class="btn small" style="margin-left:auto" data-page-link="intents">All intents</button>
+          </div>
+          ${report.decisions.map((i) => `
+            <div style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-top:8px">
+              <div style="font-weight:600;font-size:13px">Decision needed: ${esc(i.label)} <span class="muted" style="font-weight:400">· ${esc(repoName(i.projectPath))}</span></div>
+              <div class="muted" style="font-size:12.5px;margin:4px 0 8px">${esc((i.lastDetail || '').slice(0, 240))}</div>
+              <div style="display:flex;gap:8px">
+                <input data-decision-input="${i.id}" placeholder="Your decision — e.g. take the major upgrade, pin the rest" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:12.5px;padding:5px 9px" />
+                <button class="btn small primary" data-decide="${i.id}">Decide</button>
+              </div>
+            </div>`).join('')}
+        </div>` : ''}
 
       ${showDigest ? `
         <div class="digest">
@@ -574,6 +595,26 @@ async function renderHome() {
     </div>`
 
   $('#new-task')?.addEventListener('click', () => openTaskModal())
+  main.querySelectorAll('[data-page-link]').forEach((el) =>
+    el.addEventListener('click', () => go(el.dataset.pageLink))
+  )
+  main.querySelectorAll('[data-decide]').forEach((btn) =>
+    btn.addEventListener('click', async () => {
+      const input = main.querySelector(`[data-decision-input="${btn.dataset.decide}"]`)
+      const decision = input?.value.trim()
+      if (!decision) return input?.focus()
+      btn.disabled = true
+      btn.textContent = 'Launching…'
+      try {
+        await api(`/api/intents/${btn.dataset.decide}/decide`, { method: 'POST', body: { decision } })
+        go('runs')
+      } catch (err) {
+        btn.disabled = false
+        btn.textContent = 'Decide'
+        alert(err.message)
+      }
+    })
+  )
   main.querySelectorAll('[data-rescue-session]').forEach((btn) =>
     btn.addEventListener('click', async () => {
       btn.disabled = true
@@ -1335,6 +1376,125 @@ function openConnectorModal() {
   })
 }
 
+/* ---------- Intents (the reconciliation loop) ---------- */
+
+const intentStatusChip = (status) =>
+  ({
+    holding: `<span class="chip green">${icon('check', 12)}holding</span>`,
+    drifting: `<span class="chip" style="color:var(--attention);border-color:var(--attention)">drifting</span>`,
+    converging: `<span class="chip green"><span class="dot green pulse"></span>converging</span>`,
+    'decision-needed': `<span class="chip red">decision needed</span>`,
+    unknown: `<span class="chip">unknown</span>`,
+  })[status] || `<span class="chip">not checked yet</span>`
+
+async function renderIntents() {
+  const intents = await api('/api/intents')
+  const byRepo = {}
+  for (const intent of intents) (byRepo[intent.projectPath] ||= []).push(intent)
+
+  main.innerHTML = `
+    <div class="page">
+      <div class="page-head">
+        <div><h1>Intents</h1><p class="subtitle">Declared desired states. Basecamp continuously checks reality, fixes drift, and escalates only genuinely human decisions.</p></div>
+        <button class="btn primary" id="new-intent">Declare intent</button>
+      </div>
+      ${intents.length ? Object.entries(byRepo).map(([path, list]) => `
+        <div class="box">
+          <div class="box-head">${icon('repo', 14)} ${esc(repoName(path))}</div>
+          ${list.map((i) => `
+            <div class="row">
+              <div class="grow">
+                <div class="title">${esc(i.label)} ${intentStatusChip(i.enabled ? i.lastStatus : 'paused')} ${!i.enabled ? '<span class="chip">paused</span>' : ''}</div>
+                <div class="sub">${i.lastDetail ? esc(i.lastDetail.split('\n')[0].slice(0, 120)) : 'Not checked yet'} · every ${i.intervalMinutes}m${i.lastCheck ? ` · checked ${fmtTime(i.lastCheck)}` : ''}</div>
+              </div>
+              <span style="white-space:nowrap;display:flex;gap:6px">
+                <button class="btn small" data-check="${i.id}" title="Reconcile now">${icon('sync', 12)}</button>
+                <button class="btn small" data-toggle-intent="${i.id}">${i.enabled ? 'Pause' : 'Resume'}</button>
+                <button class="btn small danger" data-del-intent="${i.id}">${icon('x', 12)}</button>
+              </span>
+            </div>`).join('')}
+        </div>`).join('') : `
+        <div class="box"><div class="empty">
+          No intents declared. Try the builtins — tests always green, dependencies current, backlog triaged —<br/>
+          or declare anything in plain English: <span class="muted">"the README always documents every CLI flag."</span><br/><br/>
+          You can also just tell a repo's manager: <span class="muted">"keep the tests green from now on."</span>
+        </div></div>`}
+    </div>`
+
+  $('#new-intent')?.addEventListener('click', openIntentModal)
+  main.querySelectorAll('[data-check]').forEach((el) =>
+    el.addEventListener('click', async () => {
+      el.disabled = true
+      await api(`/api/intents/${el.dataset.check}/reconcile`, { method: 'POST' })
+      renderIntents()
+    })
+  )
+  main.querySelectorAll('[data-toggle-intent]').forEach((el) =>
+    el.addEventListener('click', async () => {
+      const intent = intents.find((i) => i.id === el.dataset.toggleIntent)
+      await api(`/api/intents/${intent.id}`, { method: 'PUT', body: { enabled: !intent.enabled } })
+      renderIntents()
+    })
+  )
+  main.querySelectorAll('[data-del-intent]').forEach((el) =>
+    el.addEventListener('click', async () => {
+      if (!confirm('Delete this intent?')) return
+      await api(`/api/intents/${el.dataset.delIntent}`, { method: 'DELETE' })
+      renderIntents()
+    })
+  )
+}
+
+async function openIntentModal(presetRepo = null) {
+  const repos = await api('/api/projects')
+  openModal(`
+    <h2>Declare an intent</h2>
+    <form id="intent-form">
+      <label class="field">Repository
+        <select name="projectPath">${repoOptions(repos, typeof presetRepo === 'string' ? presetRepo : null)}</select>
+      </label>
+      <label class="field">Desired state
+        <select name="kind" id="intent-kind">
+          <option value="tests-green">Tests always green (runs your suite)</option>
+          <option value="deps-fresh">Dependencies current (npm outdated)</option>
+          <option value="backlog-triaged">Issue backlog triaged (via gh)</option>
+          <option value="custom">Custom — describe it in English</option>
+        </select>
+      </label>
+      <label class="field hidden" id="intent-text-field">Intent
+        <textarea name="text" placeholder="e.g. The changelog always covers every user-facing change in main."></textarea>
+      </label>
+      <label class="field">Check every
+        <select name="intervalMinutes">
+          <option value="60">hour</option>
+          <option value="120" selected>2 hours</option>
+          <option value="360">6 hours</option>
+          <option value="720">12 hours</option>
+          <option value="1440">day</option>
+        </select>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>Cancel</button>
+        <button type="submit" class="btn primary">Declare</button>
+      </div>
+    </form>`)
+  $('#intent-kind').addEventListener('change', (e) => {
+    $('#intent-text-field').classList.toggle('hidden', e.target.value !== 'custom')
+  })
+  wireModalForm('#intent-form', async (fields) => {
+    await api('/api/intents', {
+      method: 'POST',
+      body: {
+        projectPath: fields.projectPath,
+        builtin: fields.kind === 'custom' ? null : fields.kind,
+        text: fields.kind === 'custom' ? fields.text : null,
+        intervalMinutes: Number(fields.intervalMinutes),
+      },
+    })
+    render()
+  })
+}
+
 /* ---------- Catalog ---------- */
 
 async function renderCatalog() {
@@ -1514,6 +1674,8 @@ async function openPalette() {
     { label: 'Routines', hint: 'go to', iconName: 'sync', keywords: 'routines schedule', action: () => go('routines') },
     { label: 'Runs', hint: 'go to', iconName: 'terminal', keywords: 'runs tasks background', action: () => go('runs') },
     { label: 'Stats', hint: 'go to', iconName: 'graph', keywords: 'stats usage tokens activity', action: () => go('stats') },
+    { label: 'Intents', hint: 'go to', iconName: 'pulse', keywords: 'intents reconcile desired state converge decisions', action: () => go('intents') },
+    { label: 'Declare an intent', hint: 'command', iconName: 'pulse', keywords: 'intent declare new desired state', action: () => openIntentModal() },
     { label: 'Catalog', hint: 'go to', iconName: 'plus', keywords: 'catalog install connectors skills mcp marketplace', action: () => go('catalog') },
     { label: 'Settings', hint: 'go to', iconName: 'gear', keywords: 'settings notifications slack discord telegram webhooks', action: () => go('settings') },
   ]
@@ -1580,6 +1742,7 @@ document.addEventListener('keydown', (e) => {
 const pages = {
   home: renderHome,
   repos: renderRepos,
+  intents: renderIntents,
   routines: renderRoutines,
   runs: renderRuns,
   stats: renderStats,
@@ -1591,6 +1754,7 @@ const pages = {
 const NAV = [
   { page: 'home', label: 'Home', iconName: 'home' },
   { page: 'repos', label: 'Repositories', iconName: 'repo' },
+  { page: 'intents', label: 'Intents', iconName: 'pulse' },
   { page: 'routines', label: 'Routines', iconName: 'sync' },
   { page: 'runs', label: 'Runs', iconName: 'terminal' },
   { page: 'stats', label: 'Stats', iconName: 'graph' },

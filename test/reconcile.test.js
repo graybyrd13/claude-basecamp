@@ -1,0 +1,185 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { Store } from '../src/lib/store.js'
+import { reconcileIntent, reconcileDue, intentReport, BUILTINS } from '../src/lib/reconcile.js'
+import { detectTestCommand } from '../src/lib/checks.js'
+
+function tempStores() {
+  const home = mkdtempSync(join(tmpdir(), 'basecamp-reconcile-'))
+  mkdirSync(join(home, 'logs'), { recursive: true })
+  return {
+    home,
+    intents: new Store(home, 'intents'),
+    runs: new Store(home, 'runs'),
+    updates: new Store(home, 'updates'),
+    settings: new Store(home, 'settings'),
+  }
+}
+
+function makeIntent(stores, overrides = {}) {
+  return stores.intents.insert({
+    projectPath: overrides.projectPath || mkdtempSync(join(tmpdir(), 'basecamp-repo-')),
+    builtin: 'tests-green',
+    text: null,
+    label: 'Tests always green',
+    intervalMinutes: 60,
+    enabled: true,
+    lastCheck: null,
+    lastStatus: null,
+    lastDetail: null,
+    lastRunId: null,
+    failStreak: 0,
+    ...overrides,
+  })
+}
+
+const fakeLaunch = (calls) => (stores, options) => {
+  calls.push(options)
+  return stores.runs.insert({ ...options, status: 'running', startedAt: Date.now() })
+}
+
+test('holding: a passing check records status and resets the fail streak', async () => {
+  const stores = tempStores()
+  const intent = makeIntent(stores, { failStreak: 1 })
+  const result = await reconcileIntent(stores, intent, {
+    check: async () => ({ status: 'holding', detail: 'green' }),
+  })
+  assert.equal(result.lastStatus, 'holding')
+  assert.equal(result.failStreak, 0)
+  assert.ok(result.lastCheck)
+  rmSync(stores.home, { recursive: true, force: true })
+})
+
+test('drifting: launches a convergence run and marks converging', async () => {
+  const stores = tempStores()
+  const intent = makeIntent(stores)
+  const calls = []
+  const result = await reconcileIntent(stores, intent, {
+    check: async () => ({ status: 'drifting', detail: '2 tests failing' }),
+    launch: fakeLaunch(calls),
+  })
+  assert.equal(result.lastStatus, 'converging')
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].intentId, intent.id)
+  assert.match(calls[0].prompt, /test suite is failing/i)
+  assert.ok(result.lastRunId)
+  rmSync(stores.home, { recursive: true, force: true })
+})
+
+test('converging: waits while the convergence run is still in flight', async () => {
+  const stores = tempStores()
+  const run = stores.runs.insert({ status: 'running', startedAt: Date.now() })
+  const intent = makeIntent(stores, { lastRunId: run.id, lastStatus: 'converging' })
+  let checked = false
+  const result = await reconcileIntent(stores, intent, {
+    check: async () => {
+      checked = true
+      return { status: 'holding' }
+    },
+  })
+  assert.equal(result.lastStatus, 'converging')
+  assert.equal(checked, false)
+  rmSync(stores.home, { recursive: true, force: true })
+})
+
+test('escalation: repeated failed convergence becomes a human decision, never silent', async () => {
+  const stores = tempStores()
+  const failedRun = stores.runs.insert({ status: 'succeeded', startedAt: Date.now() })
+  const intent = makeIntent(stores, { lastRunId: failedRun.id, failStreak: 1 })
+  const calls = []
+  const result = await reconcileIntent(stores, intent, {
+    check: async () => ({ status: 'drifting', detail: 'still failing' }),
+    launch: fakeLaunch(calls),
+  })
+  assert.equal(result.lastStatus, 'decision-needed')
+  assert.equal(calls.length, 0)
+  const updates = stores.updates.list()
+  assert.equal(updates[0].kind, 'decision-needed')
+  assert.match(updates[0].title, /Decision needed/)
+  rmSync(stores.home, { recursive: true, force: true })
+})
+
+test('decision-needed from the check escalates directly', async () => {
+  const stores = tempStores()
+  const intent = makeIntent(stores, { builtin: null, text: 'ship v1 by March', label: 'ship v1 by March' })
+  const result = await reconcileIntent(stores, intent, {
+    check: async () => ({ status: 'decision-needed', detail: 'scope choice required' }),
+  })
+  assert.equal(result.lastStatus, 'decision-needed')
+  rmSync(stores.home, { recursive: true, force: true })
+})
+
+test('daily budget: exhausting convergence attempts escalates instead of burning tokens', async () => {
+  const stores = tempStores()
+  const intent = makeIntent(stores)
+  for (let i = 0; i < 6; i++) {
+    stores.runs.insert({ intentId: intent.id, status: 'succeeded', startedAt: Date.now() - i * 1000 })
+  }
+  const calls = []
+  const result = await reconcileIntent(stores, intent, {
+    check: async () => ({ status: 'drifting', detail: 'still red' }),
+    launch: fakeLaunch(calls),
+  })
+  assert.equal(calls.length, 0)
+  assert.equal(result.lastStatus, 'decision-needed')
+  assert.match(stores.updates.list()[0].body, /budget/i)
+  rmSync(stores.home, { recursive: true, force: true })
+})
+
+test('missing repo path marks unknown without launching anything', async () => {
+  const stores = tempStores()
+  const intent = makeIntent(stores, { projectPath: '/definitely/not/a/real/path' })
+  const result = await reconcileIntent(stores, intent, {
+    check: async () => ({ status: 'drifting', detail: 'x' }),
+  })
+  assert.equal(result.lastStatus, 'unknown')
+  rmSync(stores.home, { recursive: true, force: true })
+})
+
+test('reconcileDue respects intervals and skips disabled intents', async () => {
+  const stores = tempStores()
+  const due = makeIntent(stores, { lastCheck: Date.now() - 61 * 60 * 1000 })
+  makeIntent(stores, { lastCheck: Date.now() - 5 * 60 * 1000 }) // not due
+  makeIntent(stores, { enabled: false, lastCheck: null }) // disabled
+  const results = await reconcileDue(stores, {
+    check: async () => ({ status: 'holding', detail: 'ok' }),
+  })
+  assert.equal(results.length, 1)
+  assert.equal(results[0].id, due.id)
+  rmSync(stores.home, { recursive: true, force: true })
+})
+
+test('intentReport aggregates statuses', () => {
+  const stores = tempStores()
+  makeIntent(stores, { lastStatus: 'holding' })
+  makeIntent(stores, { lastStatus: 'drifting' })
+  makeIntent(stores, { lastStatus: 'decision-needed', lastDetail: 'pick one' })
+  makeIntent(stores, { enabled: false, lastStatus: 'holding' })
+  const report = intentReport(stores)
+  assert.equal(report.total, 3)
+  assert.equal(report.holding, 1)
+  assert.equal(report.drifting, 1)
+  assert.equal(report.decisions.length, 1)
+  rmSync(stores.home, { recursive: true, force: true })
+})
+
+test('every builtin has a label, check, and fix prompt', () => {
+  for (const [id, b] of Object.entries(BUILTINS)) {
+    assert.ok(b.label, id)
+    assert.equal(typeof b.check, 'function', id)
+    assert.match(b.fixPrompt('detail'), /detail/)
+  }
+})
+
+test('detectTestCommand finds npm test scripts and ignores the placeholder', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'basecamp-detect-'))
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { test: 'node --test' } }))
+  assert.deepEqual(detectTestCommand(dir), { cmd: 'npm', args: ['test'] })
+
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { test: 'echo "Error: no test specified" && exit 1' } }))
+  assert.equal(detectTestCommand(dir), null)
+  rmSync(dir, { recursive: true, force: true })
+})

@@ -20,7 +20,7 @@ const liveProcesses = new Map()
  * approveRun (resuming a run that paused on a permission wall) — both just
  * differ in the prompt/permission-mode/session they hand in.
  */
-function spawnTurn(stores, run, { prompt, permissionMode, model, timeoutMinutes, startShaPromise, resumeSessionId, spawnFn }) {
+function spawnTurn(stores, run, { prompt, permissionMode, model, timeoutMinutes, startShaPromise, resumeSessionId, allowedTools, spawnFn }) {
   const logPath = join(stores.home, 'logs', `${run.id}.log`)
   const logStream = createWriteStream(logPath, { flags: 'a' })
   // Readline can flush buffered lines after the exit handler has ended the
@@ -34,6 +34,7 @@ function spawnTurn(stores, run, { prompt, permissionMode, model, timeoutMinutes,
   if (resumeSessionId) args.push('--resume', resumeSessionId)
   if (permissionMode !== 'default') args.push('--permission-mode', permissionMode)
   if (model) args.push('--model', model)
+  if (allowedTools && allowedTools.length) args.push('--allowedTools', allowedTools.join(','))
 
   const child = spawnFn('claude', args, {
     cwd: run.projectPath,
@@ -148,6 +149,8 @@ export function launchRun(stores, options, spawnFn = spawn) {
     // Session Rescue: resume a dead session's context instead of starting fresh.
     resumeSessionId = null,
     rescuedSessionId = null,
+    allowedTools = null,
+    intentId = null,
   } = options
 
   if (!projectPath || !existsSync(projectPath)) {
@@ -178,6 +181,7 @@ export function launchRun(stores, options, spawnFn = spawn) {
     commits: [],
     permissionDenials: [],
     rescuedSessionId,
+    intentId,
   })
 
   // Snapshot HEAD so commits made by this run can be linked to it afterwards.
@@ -190,6 +194,7 @@ export function launchRun(stores, options, spawnFn = spawn) {
     timeoutMinutes,
     startShaPromise,
     resumeSessionId,
+    allowedTools,
     spawnFn,
   })
 

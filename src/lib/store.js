@@ -82,5 +82,7 @@ export function openStores(home = resolveBasecampHome()) {
     managers: new Store(home, 'managers'),
     messages: new Store(home, 'messages'),
     settings: new Store(home, 'settings'),
+    memory: new Store(home, 'memory'),
+    intents: new Store(home, 'intents'),
   }
 }

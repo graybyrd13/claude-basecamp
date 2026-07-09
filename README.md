@@ -6,7 +6,7 @@
 [![Node 18+](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](package.json)
 [![Zero dependencies](https://img.shields.io/badge/dependencies-0-black.svg)](package.json)
 
-**A manager for every project — running on your machine.** Basecamp gives each of your projects a persistent Claude manager you talk to from a localhost dashboard. It sets up automation, tracks goals, launches background work, and keeps development moving even when you're not there.
+**Declare outcomes. Basecamp holds reality to them.** Kubernetes gave infrastructure a reconciliation loop — declare desired state, and the system continuously enforces it. Basecamp does that for your codebases: declare intents like *"tests always green"* or *"the changelog covers every release"*, and a local daemon continuously checks reality, dispatches Claude Code to fix drift, verifies convergence, and escalates only the decisions a human must make. Plus a persistent manager agent per repo, scheduled routines, session rescue, and full visibility into everything Claude does on your machine.
 
 ```bash
 npx claude-basecamp
@@ -22,11 +22,22 @@ No install, no database, no config. Basecamp discovers the projects Claude Code 
 
 ## What you can do
 
+**Declare intents — the reconciliation loop.** The core idea: stop operating your AI; declare desired states and let the loop hold them.
+
+```
+tests always green          -> runs your suite on a cadence; failures dispatch a fix run that commits
+dependencies current        -> npm outdated; safe updates applied, majors escalated to you
+issue backlog triaged       -> gh-powered labeling and stale-closing
+anything in plain English   -> "the README documents every CLI flag" — checked read-only, fixed on drift
+```
+
+Reality is checked with deterministic local facts where possible (your actual test suite, real `npm outdated`) — zero tokens spent on checks. Drift launches a bounded convergence run (concurrency-capped, daily-budgeted, approval-gated). Repeated failure **escalates to a decision card on Home** instead of retrying forever — drift is never silently ignored. Home opens with the convergence report: *holding / converging / drifting / decisions needed*.
+
 **Session Rescue.** Basecamp notices when a Claude Code session died with unfinished work — crashed mid-tool-call, interrupted, or abandoned — and shows it on Home. One click resumes the *actual dead session* (same session ID, full context intact) as a background run that finishes the job and commits. Only a tool with local transcript access can do this.
 
 **Talk to your repository's manager.** Every project gets a persistent agent with full Claude Code tools in that directory, plus control over Basecamp itself:
 
-> *"Run the test suite every night at 9 and fix whatever fails."* → it creates the routine
+> *"Keep the tests green from now on."* → it declares a standing intent
 > *"Our goal is to ship v1 by end of month — track it."* → it records the goal
 > *"Set up a hook that runs prettier after every edit."* → it edits `.claude/settings.json`
 > *"What's the state of this repo?"* → it reads the code and tells you
@@ -102,6 +113,8 @@ This tool reads your Claude Code history and runs Claude unattended, so the secu
 ## Roadmap
 
 - [x] Approval queue: runs pause on permission walls instead of being denied
+- [x] Intents: continuous reconciliation of declared desired states
+- [ ] Cross-repo resource governor: global token/attention budgeting across all intents
 - [ ] Cost guardrails: per-routine monthly budgets
 - [ ] One-click graphify export for token-heavy sessions
 
