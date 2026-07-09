@@ -9,6 +9,11 @@ import { once } from 'node:events'
 import { Store } from '../src/lib/store.js'
 import { launchRun, approveRun, denyRun } from '../src/lib/runner.js'
 
+/** Windows keeps just-closed log file handles briefly locked — retry removal. */
+function cleanup(...dirs) {
+  for (const dir of dirs) rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
+}
+
 function tempStores() {
   const home = mkdtempSync(join(tmpdir(), 'basecamp-runner-test-'))
   mkdirSync(join(home, 'logs'), { recursive: true })
@@ -83,8 +88,7 @@ test('launchRun spawns claude with the expected args and reaches "succeeded"', a
   assert.equal(finished.status, 'succeeded')
   assert.equal(finished.resultText, 'all done')
   assert.equal(finished.sessionId, 'sess-1')
-  rmSync(stores.home, { recursive: true, force: true })
-  rmSync(projectPath, { recursive: true, force: true })
+  cleanup(stores.home, projectPath)
 })
 
 test('launchRun pauses as "awaiting-approval" when Claude reports a permission denial', async () => {
@@ -127,8 +131,7 @@ test('launchRun pauses as "awaiting-approval" when Claude reports a permission d
   assert.equal(updates[0].kind, 'run-awaiting-approval')
   assert.match(updates[0].body, /rm -rf build/)
 
-  rmSync(stores.home, { recursive: true, force: true })
-  rmSync(projectPath, { recursive: true, force: true })
+  cleanup(stores.home, projectPath)
 })
 
 test('approveRun resumes the paused session with elevated permission for just that turn', async () => {
@@ -181,15 +184,14 @@ test('approveRun resumes the paused session with elevated permission for just th
   ])
   assert.equal((await settled(stores, run.id)).status, 'succeeded')
 
-  rmSync(stores.home, { recursive: true, force: true })
-  rmSync(projectPath, { recursive: true, force: true })
+  cleanup(stores.home, projectPath)
 })
 
 test('approveRun rejects runs that are not awaiting approval', () => {
   const stores = tempStores()
   const run = stores.runs.insert({ projectPath: '/tmp', status: 'running', sessionId: 's' })
   assert.throws(() => approveRun(stores, run.id, {}, () => fakeChild()), /awaiting approval/)
-  rmSync(stores.home, { recursive: true, force: true })
+  cleanup(stores.home)
 })
 
 test('denyRun marks the run denied without spawning anything', () => {
@@ -210,12 +212,12 @@ test('denyRun marks the run denied without spawning anything', () => {
   assert.equal(updates.length, 1)
   assert.equal(updates[0].kind, 'run-denied')
 
-  rmSync(stores.home, { recursive: true, force: true })
+  cleanup(stores.home)
 })
 
 test('denyRun rejects runs that are not awaiting approval', () => {
   const stores = tempStores()
   const run = stores.runs.insert({ projectPath: '/tmp', status: 'succeeded' })
   assert.throws(() => denyRun(stores, run.id), /awaiting approval/)
-  rmSync(stores.home, { recursive: true, force: true })
+  cleanup(stores.home)
 })
