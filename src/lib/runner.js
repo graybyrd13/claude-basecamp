@@ -145,6 +145,9 @@ export function launchRun(stores, options, spawnFn = spawn) {
     routineId = null,
     routineName = null,
     timeoutMinutes = DEFAULT_TIMEOUT_MINUTES,
+    // Session Rescue: resume a dead session's context instead of starting fresh.
+    resumeSessionId = null,
+    rescuedSessionId = null,
   } = options
 
   if (!projectPath || !existsSync(projectPath)) {
@@ -174,6 +177,7 @@ export function launchRun(stores, options, spawnFn = spawn) {
     error: null,
     commits: [],
     permissionDenials: [],
+    rescuedSessionId,
   })
 
   // Snapshot HEAD so commits made by this run can be linked to it afterwards.
@@ -185,7 +189,7 @@ export function launchRun(stores, options, spawnFn = spawn) {
     model,
     timeoutMinutes,
     startShaPromise,
-    resumeSessionId: null,
+    resumeSessionId,
     spawnFn,
   })
 

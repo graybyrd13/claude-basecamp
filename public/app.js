@@ -37,6 +37,7 @@ const ICONS = {
   arrowDown: '<path fill="currentColor" d="M13.03 8.22a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.47 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L7.5 11.19V2.75a.75.75 0 0 1 1.5 0v8.44l2.97-2.97a.75.75 0 0 1 1.06 0Z"/>',
   terminal: '<path fill="currentColor" d="M0 2.75C0 1.784.784 1 1.75 1h12.5c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0 1 14.25 15H1.75A1.75 1.75 0 0 1 0 13.25Zm1.75-.25a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V2.75a.25.25 0 0 0-.25-.25ZM7.25 8a.749.749 0 0 1-.22.53l-2.25 2.25a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734L5.44 8 3.72 6.28a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215l2.25 2.25c.141.14.22.331.22.53Zm1.5 1.5h3a.75.75 0 0 1 0 1.5h-3a.75.75 0 0 1 0-1.5Z"/>',
   plus: '<path fill="currentColor" d="M7.75 2a.75.75 0 0 1 .75.75V7h4.25a.75.75 0 0 1 0 1.5H8.5v4.25a.75.75 0 0 1-1.5 0V8.5H2.75a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2Z"/>',
+  pulse: '<path fill="currentColor" d="M6 2c.353 0 .66.246.735.591L8.6 11.19l1.166-3.5A.75.75 0 0 1 10.48 7.2h4.77a.75.75 0 0 1 0 1.5h-4.229l-1.81 5.428a.75.75 0 0 1-1.446-.046L5.9 5.51l-1.168 4.09A.75.75 0 0 1 4.01 10.15H.75a.75.75 0 0 1 0-1.5h2.696l1.82-6.104A.75.75 0 0 1 6 2Z"/>',
 }
 
 /* ---------- helpers ---------- */
@@ -459,12 +460,13 @@ function gitChips(git) {
 /* ---------- Home ---------- */
 
 async function renderHome() {
-  const [overview, updates, runs, routines, digest] = await Promise.all([
+  const [overview, updates, runs, routines, digest, rescue] = await Promise.all([
     api('/api/overview'),
     api('/api/updates'),
     api('/api/runs'),
     api('/api/routines'),
     api('/api/digest'),
+    api('/api/rescue').catch(() => []),
   ])
   const running = runs.filter((r) => r.status === 'running')
   const awaiting = runs.filter((r) => r.status === 'awaiting-approval')
@@ -524,6 +526,21 @@ async function renderHome() {
             </div>`).join('')}
         </div>` : ''}
 
+      ${rescue.length ? `
+        <div class="box">
+          <div class="box-head">${icon('pulse', 14)} Unfinished work <span class="count">${rescue.length}</span></div>
+          ${rescue.map((c) => `
+            <div class="row">
+              <div class="grow">
+                <div class="title">${esc((c.title || c.sessionId.slice(0, 8)).slice(0, 70))}
+                  <span class="chip">${esc(c.reason)}</span>
+                </div>
+                <div class="sub">${esc(repoName(c.projectPath))} · ${fmtTime(c.lastActivity)} · ${esc(c.detail)}</div>
+              </div>
+              <button class="btn small primary" data-rescue-session="${esc(c.sessionId)}" data-rescue-path="${esc(c.projectPath)}">Rescue</button>
+            </div>`).join('')}
+        </div>` : ''}
+
       ${upcoming.length ? `
         <div class="box">
           <div class="box-head">${icon('clock', 14)} Up next</div>
@@ -557,6 +574,23 @@ async function renderHome() {
     </div>`
 
   $('#new-task')?.addEventListener('click', () => openTaskModal())
+  main.querySelectorAll('[data-rescue-session]').forEach((btn) =>
+    btn.addEventListener('click', async () => {
+      btn.disabled = true
+      btn.textContent = 'Rescuing…'
+      try {
+        await api('/api/rescue', {
+          method: 'POST',
+          body: { sessionId: btn.dataset.rescueSession, projectPath: btn.dataset.rescuePath },
+        })
+        go('runs')
+      } catch (err) {
+        btn.disabled = false
+        btn.textContent = 'Rescue'
+        alert(err.message)
+      }
+    })
+  )
   $('#digest-ack')?.addEventListener('click', async () => {
     await api('/api/digest/ack', { method: 'POST' })
     renderHome()

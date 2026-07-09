@@ -82,6 +82,10 @@ function emptySummary() {
     tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
     subagents: 0,
     slashCommands: [],
+    // How the transcript ends — the signal Session Rescue classifies on.
+    lastEvent: null, // 'user' | 'tool-result' | 'assistant-text' | 'assistant-tool'
+    lastToolName: null,
+    lastUserText: null,
   }
 }
 
@@ -115,6 +119,15 @@ function applyEntry(summary, entry) {
       const match = text.match(/<command-name>([^<]+)<\/command-name>/)
       if (match) summary.slashCommands.push(match[1])
     }
+    const isToolResult =
+      Array.isArray(entry.message.content) &&
+      entry.message.content.some((p) => p && p.type === 'tool_result')
+    if (isToolResult) {
+      summary.lastEvent = 'tool-result'
+    } else if (text && !text.startsWith('<')) {
+      summary.lastEvent = 'user'
+      summary.lastUserText = text.slice(0, 300)
+    }
   }
   if (entry.type === 'assistant' && entry.message) {
     summary.assistantMessages++
@@ -128,12 +141,16 @@ function applyEntry(summary, entry) {
       summary.tokens.cacheCreation += usage.cache_creation_input_tokens || 0
     }
     if (Array.isArray(entry.message.content)) {
+      let sawToolUse = false
       for (const part of entry.message.content) {
         if (part && part.type === 'tool_use') {
           summary.toolCalls++
+          sawToolUse = true
+          summary.lastToolName = part.name
           if (part.name === 'Task' || part.name === 'Agent') summary.subagents++
         }
       }
+      summary.lastEvent = sawToolUse ? 'assistant-tool' : 'assistant-text'
     }
   }
 }

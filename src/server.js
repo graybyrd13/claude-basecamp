@@ -16,6 +16,7 @@ import { repoGithub, issueRunPrompt } from './lib/github.js'
 import { addConnector, removeConnector } from './lib/connectors.js'
 import { getSettings, updateSettings } from './lib/settings.js'
 import { catalogWithStatus, loadCatalog, installSkill, uninstallSkill } from './lib/catalog.js'
+import { findRescueCandidates, rescuePrompt, validateRescueTarget } from './lib/rescue.js'
 import { sendNotification } from './lib/notify.js'
 import { randomBytes } from 'node:crypto'
 
@@ -302,6 +303,27 @@ async function handleApi(req, res, url, ctx) {
         prompt: issueRunPrompt(Number(body.issue)),
         permissionMode: 'acceptEdits',
         model: body.model || 'sonnet',
+      })
+      return json(res, 201, run)
+    }
+
+    // ---------- session rescue ----------
+    if (route === '/api/rescue' && method === 'GET') {
+      return json(res, 200, await findRescueCandidates(claudeDir, stores))
+    }
+    if (route === '/api/rescue' && method === 'POST') {
+      const body = await readBody(req)
+      if (!body.sessionId || !body.projectPath) {
+        return json(res, 400, { error: 'sessionId and projectPath are required' })
+      }
+      validateRescueTarget(claudeDir, body.projectPath)
+      const run = launchRun(stores, {
+        projectPath: body.projectPath,
+        prompt: rescuePrompt(),
+        permissionMode: 'acceptEdits',
+        model: body.model || null,
+        resumeSessionId: body.sessionId,
+        rescuedSessionId: body.sessionId,
       })
       return json(res, 201, run)
     }

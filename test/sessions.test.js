@@ -39,6 +39,13 @@ test('summarizeSession aggregates tokens, messages, and tool calls', async () =>
   assert.deepEqual(s.slashCommands, ['/review'])
 })
 
+test('summarizeSession tracks how the transcript ends for rescue', async () => {
+  const s = await summarizeSession(FIXTURE_DIR, PROJECT_ID, SESSION_ID)
+  // Fixture's last non-sidechain, non-command event is an assistant tool_use (Task).
+  assert.equal(s.lastEvent, 'assistant-tool')
+  assert.equal(s.lastToolName, 'Task')
+})
+
 test('summarizeSession survives malformed JSONL lines', async () => {
   // The fixture contains an invalid line; parsing must still succeed.
   const s = await summarizeSession(FIXTURE_DIR, PROJECT_ID, SESSION_ID)

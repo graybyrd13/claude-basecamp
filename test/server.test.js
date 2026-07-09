@@ -243,6 +243,28 @@ test('connector add validates input and rejects bad names', async (t) => {
   assert.equal(badUrl.status, 400)
 })
 
+test('rescue endpoint lists candidates and validates rescue requests', async (t) => {
+  const base = await withServer(t)
+
+  // Fixture project's decoded path doesn't exist on disk, so no candidates.
+  const candidates = await (await fetch(`${base}/api/rescue`)).json()
+  assert.ok(Array.isArray(candidates))
+
+  const missing = await fetch(`${base}/api/rescue`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId: 'abc' }),
+  })
+  assert.equal(missing.status, 400)
+
+  const badPath = await fetch(`${base}/api/rescue`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId: 'abc', projectPath: '/definitely/not/real' }),
+  })
+  assert.equal(badPath.status, 400)
+})
+
 test('run launch validates project path before spawning', async (t) => {
   const base = await withServer(t)
   const res = await fetch(`${base}/api/runs`, {

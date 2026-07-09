@@ -22,6 +22,8 @@ No install, no database, no config. Basecamp discovers the projects Claude Code 
 
 ## What you can do
 
+**Session Rescue.** Basecamp notices when a Claude Code session died with unfinished work — crashed mid-tool-call, interrupted, or abandoned — and shows it on Home. One click resumes the *actual dead session* (same session ID, full context intact) as a background run that finishes the job and commits. Only a tool with local transcript access can do this.
+
 **Talk to your repository's manager.** Every project gets a persistent agent with full Claude Code tools in that directory, plus control over Basecamp itself:
 
 > *"Run the test suite every night at 9 and fix whatever fails."* → it creates the routine
