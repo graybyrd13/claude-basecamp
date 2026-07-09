@@ -1,5 +1,6 @@
 # Claude Basecamp
 
+[![npm](https://img.shields.io/npm/v/claude-basecamp.svg)](https://www.npmjs.com/package/claude-basecamp)
 [![Tests](https://github.com/graybyrd13/claude-basecamp/actions/workflows/test.yml/badge.svg)](https://github.com/graybyrd13/claude-basecamp/actions/workflows/test.yml)
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](LICENSE)
 [![Node 18+](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](package.json)

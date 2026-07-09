@@ -64,7 +64,7 @@ const claudeDir = resolveClaudeDir(args.dir)
 
 startServer({ port: args.port, claudeDir })
   .then(({ url }) => {
-    console.log(`\n  ⛺ Claude Basecamp running at ${url}`)
+    console.log(`\n  Claude Basecamp running at ${url}`)
     console.log(`     Data directory: ${claudeDir}\n`)
     if (args.open) openBrowser(url)
   })
