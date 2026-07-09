@@ -8,32 +8,26 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⛺</text></svg>" />
 </head>
 <body>
-  <header>
-    <h1>⛺ Claude Basecamp</h1>
-    <span id="claude-dir" class="dim"></span>
-    <span id="live-dot" title="auto-refreshing"></span>
-  </header>
+  <aside id="sidebar">
+    <div class="logo">⛺<span class="wordmark">basecamp</span></div>
+    <nav id="nav-main">
+      <button data-page="home" class="active"><span class="icon">⌂</span><span class="nav-label">Home</span></button>
+      <button data-page="projects"><span class="icon">▦</span><span class="nav-label">Projects</span></button>
+      <button data-page="routines"><span class="icon">↻</span><span class="nav-label">Routines</span></button>
+      <button data-page="runs"><span class="icon">▶</span><span class="nav-label">Runs</span></button>
+      <button data-page="stats"><span class="icon">∿</span><span class="nav-label">Stats</span></button>
+    </nav>
+    <div class="nav-section-title">Managers</div>
+    <nav id="nav-projects"></nav>
+    <div class="sidebar-footer">
+      <div id="running-indicator" class="hidden"><span class="pulse-dot"></span><span id="running-count"></span> working</div>
+      <a href="https://github.com/graysonheim/claude-basecamp" target="_blank" rel="noopener">open source ↗</a>
+    </div>
+  </aside>
 
-  <nav id="tabs">
-    <button data-tab="overview" class="active">Overview</button>
-    <button data-tab="sessions">Sessions</button>
-    <button data-tab="agents">Agents</button>
-    <button data-tab="usage">Usage</button>
-    <button data-tab="connectors">Connectors</button>
-  </nav>
+  <main id="main"></main>
 
-  <main>
-    <section id="tab-overview" class="tab active"></section>
-    <section id="tab-sessions" class="tab"></section>
-    <section id="tab-agents" class="tab"></section>
-    <section id="tab-usage" class="tab"></section>
-    <section id="tab-connectors" class="tab"></section>
-  </main>
-
-  <footer class="dim">
-    claude-basecamp · open source ·
-    <a href="https://github.com/graysonheim/claude-basecamp" target="_blank" rel="noopener">GitHub</a>
-  </footer>
+  <div id="modal-backdrop" class="hidden"><div id="modal"></div></div>
 
   <script src="/app.js"></script>
 </body>

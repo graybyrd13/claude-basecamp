@@ -1,20 +1,33 @@
 # ⛺ Claude Basecamp
 
-**A zero-config localhost dashboard for Claude Code.** See every session, agent, connector, and token you've spent — across Claude Desktop, the terminal, and the API — in one place.
+**A manager for every project — running on your machine.** Basecamp gives each of your projects a persistent Claude manager you talk to from a localhost dashboard. It sets up automation, tracks goals, launches background work, and keeps development moving even when you're not there.
 
 ```bash
 npx claude-basecamp
 ```
 
-That's it. No install, no database, no configuration. Basecamp reads the session data Claude Code already writes to your machine and opens a live dashboard at `http://localhost:4747`.
+No install, no database, no config. Basecamp discovers the projects Claude Code already knows about and opens at `http://localhost:4747`.
 
-## What you get
+## What you can do
 
-- **Sessions** — every project and session Claude Code has run, with live "active now" indicators, message counts, tool calls, subagent usage, and per-session token breakdowns
-- **Agents** — all installed agent definitions with their models, tools, and descriptions
-- **Usage** — token consumption over time (input / output / cache read / cache write), daily activity, and your heaviest sessions
-- **Connectors** — every MCP server and extension (Gmail, GitHub, Linear, custom servers…) discovered across your user, project, and settings configs
-- **Graphify candidates** — sessions with heavy repeated-context reads, flagged as the best targets for [graphify](https://github.com/graysonheim/graphify)-style knowledge-graph token reduction
+**💬 Talk to your project's manager.** Every project gets a persistent agent with full Claude Code tools in that directory, plus control over Basecamp itself:
+
+> *"Run the test suite every night at 9 and fix whatever fails."* → it creates the routine
+> *"Our goal is to ship v1 by end of month — track it."* → it records the goal
+> *"Set up a hook that runs prettier after every edit."* → it edits `.claude/settings.json`
+> *"What's the state of this repo?"* → it reads the code and tells you
+
+Managers remember everything across sessions — close the tab, come back tomorrow, it knows where you left off.
+
+**↻ Routines** — scheduled prompts that run Claude Code headless in your projects (every N minutes, daily, weekly). Created in the UI or by asking a manager.
+
+**▶ Background runs** — one-off tasks ("continue development", "fix the failing CI") that run without blocking anything, with live logs, cost tracking, and stop buttons.
+
+**☀︎ Updates feed** — every routine result and finished run reports back here. Open Basecamp in the morning and see what happened overnight.
+
+**◎ Goals** — per-project objectives, visible next to the chat, checked off by you or the manager.
+
+**∿ Stats** — sessions, agents, token usage, daily activity, MCP connectors, and graphify candidates (sessions with heavy repeated-context reads, the best targets for knowledge-graph token reduction) across Claude Desktop, terminal, and API usage on your machine.
 
 ## Options
 
@@ -26,37 +39,31 @@ claude-basecamp [options]
 --no-open      Don't open the browser automatically
 ```
 
-Point `--dir` at any Claude data directory — useful for shared machines, backups, or custom `CLAUDE_CONFIG_DIR` setups.
+Basecamp's own state (routines, runs, goals, chat history) lives in `~/.claude-basecamp/` (override with `BASECAMP_HOME`).
 
 ## How it works
 
-Claude Code persists everything locally:
+- **Reads** the session transcripts, agents, and connector config Claude Code already writes locally (`~/.claude`, `~/.claude.json`) — strictly read-only.
+- **Spawns** `claude` headless (`-p --output-format stream-json`) for manager chats, routines, and runs. Managers resume a persistent session per project.
+- **Serves** everything from a zero-dependency Node server bound to `127.0.0.1`. Nothing leaves your machine. Mutating endpoints reject cross-origin requests.
+- Child `claude` processes get a sanitized environment (stale `ANTHROPIC_*` overrides stripped) so they authenticate the same way your normal Claude Code does. Set `BASECAMP_KEEP_ENV=1` if you authenticate via `ANTHROPIC_API_KEY` on purpose.
 
-| Data | Location |
-|---|---|
-| Session transcripts | `~/.claude/projects/<project>/<session>.jsonl` |
-| Agent definitions | `~/.claude/agents/*.md` |
-| MCP connectors | `~/.claude.json`, `~/.claude/settings.json` |
-
-Basecamp reads these **read-only** — it never modifies your Claude configuration or transcripts, and never sends anything off your machine. The server binds to `127.0.0.1` only. Transcript parsing is streamed and cached by file mtime, so even large histories stay fast.
-
-Zero runtime dependencies. Just Node 18+.
+Zero runtime dependencies. Node 18+ and an installed [Claude Code](https://claude.com/claude-code).
 
 ## Roadmap
 
-- [ ] Enable/disable connectors from the dashboard
-- [ ] Session resume / kill actions (via `claude` CLI integration)
-- [ ] Cost estimates per model
-- [ ] Away-mode digest: what happened while you were gone
-- [ ] Direct graphify integration: one-click knowledge-graph export for token-heavy sessions
-- [ ] GitHub bridge: link sessions to the PRs and issues they produced
+- [ ] Away digest: manager summarizes what happened since you last opened Basecamp
+- [ ] One-click graphify export for token-heavy sessions
+- [ ] GitHub bridge: link runs to the PRs/issues they produced
+- [ ] Connector enable/disable from the dashboard
+- [ ] Cost budgets per routine
 
 ## Development
 
 ```bash
 git clone https://github.com/graysonheim/claude-basecamp
 cd claude-basecamp
-npm test        # node:test, no deps
+npm test        # node:test, zero deps
 npm run dev     # start without opening a browser
 ```
 
