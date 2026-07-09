@@ -2,7 +2,7 @@
   "name": "claude-basecamp",
   "version": "0.1.0",
   "description": "Zero-config localhost dashboard for Claude Code — sessions, agents, usage, tasks, and connector management across Desktop, Terminal, and API.",
-  "license": "MIT",
+  "license": "Unlicense",
   "author": "Grayson Heim",
   "repository": {
     "type": "git",

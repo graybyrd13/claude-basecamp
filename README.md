@@ -79,4 +79,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-[MIT](LICENSE)
+Public domain, under the [Unlicense](LICENSE).
