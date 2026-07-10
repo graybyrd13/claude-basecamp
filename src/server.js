@@ -21,6 +21,7 @@ import { findRescueCandidates, rescuePrompt, validateRescueTarget } from './lib/
 import { BUILTINS, reconcileIntent, intentReport, startReconciler } from './lib/reconcile.js'
 import { mineAntibodies, reflexVerdict, immuneStats, bumpCounters } from './lib/immune.js'
 import { spendReport } from './lib/governor.js'
+import { applyCleanRoom, discardCleanRoom, cleanRoomPatch, sweepCleanRooms } from './lib/cleanroom.js'
 import { installReflexHook, uninstallReflexHook, reflexHookInstalled } from './lib/hook-installer.js'
 import { sendNotification } from './lib/notify.js'
 import { randomBytes } from 'node:crypto'
@@ -259,10 +260,12 @@ async function handleApi(req, res, url, ctx) {
         prompt: body.prompt,
         permissionMode: body.permissionMode || 'acceptEdits',
         model: body.model || null,
+        effort: body.effort || null,
+        isolation: body.isolation === 'worktree' ? 'worktree' : null,
       })
       return json(res, 201, run)
     }
-    const runMatch = route.match(/^\/api\/runs\/([\w-]+)(\/log|\/stop|\/approve|\/deny)?$/)
+    const runMatch = route.match(/^\/api\/runs\/([\w-]+)(\/log|\/stop|\/approve|\/deny|\/apply|\/discard|\/diff)?$/)
     if (runMatch) {
       const run = stores.runs.get(runMatch[1])
       if (!run) return json(res, 404, { error: 'Run not found' })
@@ -279,6 +282,18 @@ async function handleApi(req, res, url, ctx) {
       }
       if (runMatch[2] === '/deny' && method === 'POST') {
         return json(res, 200, denyRun(stores, run.id))
+      }
+      if (runMatch[2] === '/apply' && method === 'POST') {
+        return json(res, 200, await applyCleanRoom(stores, run))
+      }
+      if (runMatch[2] === '/discard' && method === 'POST') {
+        return json(res, 200, await discardCleanRoom(stores, run))
+      }
+      if (runMatch[2] === '/diff' && method === 'GET') {
+        if (!run.cleanRoom) return json(res, 404, { error: 'Run has no clean room' })
+        const patch = await cleanRoomPatch(run.projectPath, run.cleanRoom)
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
+        return res.end(patch)
       }
     }
 
@@ -361,6 +376,9 @@ async function handleApi(req, res, url, ctx) {
       const builtin = body.builtin || null
       if (builtin && !BUILTINS[builtin]) return json(res, 400, { error: `Unknown builtin: ${builtin}` })
       if (!builtin && !body.text?.trim()) return json(res, 400, { error: 'text is required for custom intents' })
+      if (body.autonomy && !['apply', 'propose'].includes(body.autonomy)) {
+        return json(res, 400, { error: 'autonomy must be "apply" or "propose"' })
+      }
       const intent = stores.intents.insert({
         projectPath: body.projectPath,
         builtin,
@@ -368,6 +386,8 @@ async function handleApi(req, res, url, ctx) {
         label: builtin ? BUILTINS[builtin].label : String(body.text).trim().slice(0, 80),
         intervalMinutes: Math.max(Number(body.intervalMinutes) || 120, 15),
         model: body.model || null,
+        // propose = converge in a clean room, hand back a diff to review.
+        autonomy: body.autonomy || 'propose',
         enabled: true,
         lastCheck: null,
         lastStatus: null,
@@ -696,6 +716,9 @@ export function startServer({ port, claudeDir, host = '127.0.0.1', basecampHome 
   // Records keyed by subdirectory or worktree paths re-key to their repo
   // root, so pre-grouping managers, goals, chats, and checks stay reachable.
   normalizeStorePaths(stores)
+
+  // Clean rooms of long-settled runs are discarded so worktrees never pile up.
+  sweepCleanRooms(stores).catch(() => {})
 
   const server = createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`)

@@ -7,6 +7,7 @@ import { headSha, commitsBetween } from './git.js'
 import { notifyRunFinished, sendNotification } from './notify.js'
 import { lastPathSegment } from './paths.js'
 import { ledgerBump } from './governor.js'
+import { createCleanRoom, cleanRoomDiff } from './cleanroom.js'
 
 const DEFAULT_TIMEOUT_MINUTES = 30
 const OUTPUT_TAIL_CHARS = 4000
@@ -26,7 +27,7 @@ const liveProcesses = new Map()
  * approveRun (resuming a run that paused on a permission wall) — both just
  * differ in the prompt/permission-mode/session they hand in.
  */
-function spawnTurn(stores, run, { prompt, permissionMode, model, effort, timeoutMinutes, startShaPromise, resumeSessionId, allowedTools, spawnFn }) {
+function spawnTurn(stores, run, { prompt, permissionMode, model, effort, timeoutMinutes, startShaPromise, resumeSessionId, allowedTools, cwd, spawnFn }) {
   const logPath = join(stores.home, 'logs', `${run.id}.log`)
   const logStream = createWriteStream(logPath, { flags: 'a' })
   // Readline can flush buffered lines after the exit handler has ended the
@@ -44,7 +45,8 @@ function spawnTurn(stores, run, { prompt, permissionMode, model, effort, timeout
   if (allowedTools && allowedTools.length) args.push('--allowedTools', allowedTools.join(','))
 
   const child = spawnFn('claude', args, {
-    cwd: run.projectPath,
+    // Clean-room runs work inside their worktree, never the user's checkout.
+    cwd: cwd || run.cleanRoom?.path || run.projectPath,
     env: sanitizedEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
     // On Windows, globally-installed npm bins resolve to a .cmd/.ps1 shim,
@@ -127,9 +129,19 @@ function spawnTurn(stores, run, { prompt, permissionMode, model, effort, timeout
     }
 
     let commits = []
+    const room = stores.runs.get(run.id)?.cleanRoom
     try {
-      const startSha = await startShaPromise
-      commits = await commitsBetween(run.projectPath, startSha, await headSha(run.projectPath))
+      if (room) {
+        // Clean-room work lives on its branch; summarize it for the review card.
+        const diff = await cleanRoomDiff(run.projectPath, room)
+        commits = diff.commits
+        stores.runs.update(run.id, {
+          cleanRoom: { ...room, stat: diff.stat, commitCount: diff.commits.length },
+        })
+      } else {
+        const startSha = await startShaPromise
+        commits = await commitsBetween(run.projectPath, startSha, await headSha(run.projectPath))
+      }
     } catch {
       /* not a repo, or git unavailable — linkage is best-effort */
     }
@@ -166,6 +178,9 @@ export function launchRun(stores, options, spawnFn = spawn) {
     rescuedSessionId = null,
     allowedTools = null,
     intentId = null,
+    // 'worktree' puts the run in a clean room: an isolated git worktree whose
+    // commits come back for review instead of landing in the user's checkout.
+    isolation = null,
   } = options
 
   if (!projectPath || !existsSync(projectPath)) {
@@ -205,22 +220,40 @@ export function launchRun(stores, options, spawnFn = spawn) {
     rescuedSessionId,
     intentId,
     ledgeredUsd: 0,
+    cleanRoom: null,
   })
 
-  // Snapshot HEAD so commits made by this run can be linked to it afterwards.
-  const startShaPromise = headSha(projectPath)
-
-  spawnTurn(stores, run, {
+  const turnOptions = {
     prompt,
     permissionMode,
     model,
     effort,
     timeoutMinutes,
-    startShaPromise,
     resumeSessionId,
     allowedTools,
     spawnFn,
-  })
+  }
+
+  if (isolation === 'worktree') {
+    // Room setup is async; the run record exists immediately either way.
+    createCleanRoom(stores, run.id, projectPath)
+      .then((room) => {
+        const roomed = stores.runs.update(run.id, { cleanRoom: room })
+        spawnTurn(stores, roomed, { ...turnOptions, cwd: room.path, startShaPromise: Promise.resolve(room.baseSha) })
+      })
+      .catch((err) => {
+        const failed = stores.runs.update(run.id, {
+          status: 'failed',
+          endedAt: Date.now(),
+          error: `Clean room setup failed: ${err.message}`,
+        })
+        recordRunUpdate(stores, failed)
+      })
+    return run
+  }
+
+  // Snapshot HEAD so commits made by this run can be linked to it afterwards.
+  spawnTurn(stores, run, { ...turnOptions, startShaPromise: headSha(projectPath) })
 
   return run
 }

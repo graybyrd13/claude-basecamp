@@ -29,6 +29,7 @@ catalog.json             The community catalog (fetched live from main by every 
 - `lib/scheduler.js` — fires **routines** on interval/daily/weekly schedules
 - `lib/reconcile.js` + `lib/checks.js` — **Checks**: deterministic drift detection (real test suite, `npm outdated`, `gh`) or plain-English evaluation, convergence runs on failure, escalation to decision cards. Bounded: concurrency cap, daily attempt cap, exponential backoff per check
 - `lib/governor.js` — **Budgets**: every run's CLI-reported cost accrues into a durable monthly ledger; global and per-repo dollar caps gate autonomous launches (checks and routines). Over budget, work pauses with a decision card — manual runs are never blocked
+- `lib/cleanroom.js` — **Clean rooms**: runs execute in disposable git worktrees on their own branches; commits come back as a reviewable diff with apply (ff/merge, conflict-safe abort) and discard. Boot sweep prunes settled rooms
 - `lib/rescue.js` — **Session Rescue**: classifies how transcripts ended; resumes dead sessions
 - `lib/immune.js` + `lib/hook-installer.js` — **Reflexes**: mines transcripts for human pushback into antibodies; an opt-in PreToolUse hook makes every session consult `/api/reflex/hook` before mutating actions
 - `lib/catalog.js` — one-click installs; remote catalog with bundled fallback, trusted-repo allowlist

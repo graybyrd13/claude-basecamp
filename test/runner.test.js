@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
@@ -242,4 +243,75 @@ test('denyRun rejects runs that are not awaiting approval', () => {
   const run = stores.runs.insert({ projectPath: '/tmp', status: 'succeeded' })
   assert.throws(() => denyRun(stores, run.id), /awaiting approval/)
   cleanup(stores.home)
+})
+
+function makeGitRepo() {
+  const dir = mkdtempSync(join(tmpdir(), 'basecamp-runner-repo-'))
+  const git = (...args) =>
+    execFileSync('git', ['-C', dir, ...args], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t.t',
+        GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t.t',
+      },
+    })
+  git('init', '-b', 'main')
+  writeFileSync(join(dir, 'a.txt'), 'one\n')
+  git('add', '.')
+  git('commit', '-m', 'first')
+  return dir
+}
+
+const waitFor = async (predicate, ms = 4000) => {
+  const start = Date.now()
+  while (!predicate()) {
+    if (Date.now() - start > ms) throw new Error('waitFor timed out')
+    await new Promise((r) => setTimeout(r, 20))
+  }
+}
+
+test('isolation: a clean-room run spawns inside the worktree, not the checkout', async () => {
+  const stores = tempStores()
+  const repo = makeGitRepo()
+  const spawns = []
+  const child = fakeChild()
+  const run = launchRun(
+    stores,
+    { projectPath: repo, prompt: 'fix things', isolation: 'worktree' },
+    (cmd, args, opts) => {
+      spawns.push({ cmd, args, opts })
+      return child
+    }
+  )
+
+  await waitFor(() => spawns.length === 1)
+  const roomed = stores.runs.get(run.id)
+  assert.ok(roomed.cleanRoom?.path)
+  assert.equal(roomed.cleanRoom.state, 'open')
+  assert.equal(spawns[0].opts.cwd, roomed.cleanRoom.path)
+  assert.notEqual(spawns[0].opts.cwd, repo)
+
+  child.stdout.end()
+  child.stderr.end()
+  child.emit('exit', 0, null)
+  await waitFor(() => stores.runs.get(run.id).status === 'succeeded')
+  cleanup(stores.home, repo)
+})
+
+test('isolation: clean room setup failure fails the run instead of spawning', async () => {
+  const stores = tempStores()
+  const notARepo = tempProjectDir()
+  const run = launchRun(
+    stores,
+    { projectPath: notARepo, prompt: 'fix things', isolation: 'worktree' },
+    () => {
+      throw new Error('spawn must not be reached')
+    }
+  )
+
+  await waitFor(() => stores.runs.get(run.id).status === 'failed')
+  assert.match(stores.runs.get(run.id).error, /clean room setup failed/i)
+  assert.equal(stores.updates.list()[0].kind, 'run-failed')
+  cleanup(stores.home, notARepo)
 })

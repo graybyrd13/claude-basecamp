@@ -111,6 +111,53 @@ async function api(path, options = {}) {
   return data
 }
 
+const cleanRoomChip = (room) =>
+  ({
+    open: `<span class="chip green">${icon('branch', 11)}clean room</span>`,
+    applied: `<span class="chip">${icon('check', 11)}applied</span>`,
+    discarded: `<span class="chip">discarded</span>`,
+  })[room?.state] || ''
+
+/** Apply / discard / view-diff buttons share wiring across Home and Runs. */
+function wireCleanRoomButtons(root, refresh) {
+  root.querySelectorAll('[data-apply-run]').forEach((el) =>
+    el.addEventListener('click', async (e) => {
+      e.stopPropagation()
+      el.disabled = true
+      try {
+        await api(`/api/runs/${el.dataset.applyRun}/apply`, { method: 'POST' })
+      } catch (err) {
+        alert(`Apply failed: ${err.message}`)
+      }
+      refresh()
+    })
+  )
+  root.querySelectorAll('[data-discard-run]').forEach((el) =>
+    el.addEventListener('click', async (e) => {
+      e.stopPropagation()
+      if (!confirm('Discard this clean room? Its commits are deleted.')) return
+      el.disabled = true
+      try {
+        await api(`/api/runs/${el.dataset.discardRun}/discard`, { method: 'POST' })
+      } catch (err) {
+        alert(`Discard failed: ${err.message}`)
+      }
+      refresh()
+    })
+  )
+  root.querySelectorAll('[data-diff-run]').forEach((el) =>
+    el.addEventListener('click', async (e) => {
+      e.stopPropagation()
+      const res = await fetch(`/api/runs/${el.dataset.diffRun}/diff`)
+      const patch = await res.text()
+      openModal(`
+        <h2>Clean room diff</h2>
+        <div class="log-view" style="max-height:60vh">${esc(patch || 'Empty diff.')}</div>
+        <div class="modal-actions"><button type="button" class="btn" data-close>Close</button></div>`)
+    })
+  )
+}
+
 const statusChip = (status) =>
   ({
     running: `<span class="chip green"><span class="dot green pulse"></span>running</span>`,
@@ -249,6 +296,10 @@ async function openTaskModal(repoPath = null, presetPrompt = '') {
         <textarea name="prompt" required placeholder="e.g. Review TODO.md and continue development on the next unchecked item. Run the tests, and commit your work when they pass.">${esc(presetPrompt)}</textarea>
       </label>
       ${modelPermissionFields(modelData)}
+      <label class="field" style="display:flex;align-items:center;gap:8px;font-weight:500">
+        <input type="checkbox" name="cleanRoom" style="width:auto;margin:0" />
+        Clean room — work in an isolated git worktree; changes come back as a diff to apply
+      </label>
       <div class="modal-actions">
         <button type="button" class="btn" data-close>Cancel</button>
         <button type="submit" class="btn primary">Run now</button>
@@ -257,7 +308,12 @@ async function openTaskModal(repoPath = null, presetPrompt = '') {
   wireModalForm('#task-form', async (fields) => {
     await api('/api/runs', {
       method: 'POST',
-      body: { ...fields, model: fields.model || null, effort: fields.effort || null },
+      body: {
+        ...fields,
+        model: fields.model || null,
+        effort: fields.effort || null,
+        isolation: fields.cleanRoom ? 'worktree' : null,
+      },
     })
     go('runs')
   })
@@ -629,7 +685,7 @@ async function renderHome(force = false) {
         <div class="digest" style="border-left-color:${report.decisions.length ? 'var(--red)' : report.drifting ? 'var(--attention)' : 'var(--green)'}">
           <div class="d-head">${icon('pulse', 15)} Checks
             <span class="muted" style="font-weight:400">
-              ${report.holding} passing${report.converging ? ` · ${report.converging} fixing` : ''}${report.drifting ? ` · ${report.drifting} failing` : ''}${report.budgetPaused ? ` · ${report.budgetPaused} over budget` : ''}${report.unknown ? ` · ${report.unknown} unknown` : ''}
+              ${report.holding} passing${report.converging ? ` · ${report.converging} fixing` : ''}${report.fixReady?.length ? ` · ${report.fixReady.length} fix ready` : ''}${report.drifting ? ` · ${report.drifting} failing` : ''}${report.budgetPaused ? ` · ${report.budgetPaused} over budget` : ''}${report.unknown ? ` · ${report.unknown} unknown` : ''}
             </span>
             <button class="btn small" style="margin-left:auto" data-page-link="intents">All checks</button>
           </div>
@@ -640,6 +696,16 @@ async function renderHome(force = false) {
               <div style="display:flex;gap:8px">
                 <input data-decision-input="${i.id}" placeholder="Your decision — e.g. take the major upgrade, pin the rest" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:12.5px;padding:5px 9px" />
                 <button class="btn small primary" data-decide="${i.id}">Decide</button>
+              </div>
+            </div>`).join('')}
+          ${(report.fixReady || []).map((i) => `
+            <div style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-top:8px">
+              <div style="font-weight:600;font-size:13px">Fix ready: ${esc(i.label)} <span class="muted" style="font-weight:400">· ${esc(repoName(i.projectPath))}</span></div>
+              <div class="muted" style="font-size:12.5px;margin:4px 0 8px">Converged in a clean room — your checkout is untouched. ${esc((i.lastDetail || '').slice(0, 180))}</div>
+              <div style="display:flex;gap:8px">
+                <button class="btn small" data-diff-run="${i.lastRunId}">View diff</button>
+                <button class="btn small primary" data-apply-run="${i.lastRunId}">Apply</button>
+                <button class="btn small danger" data-discard-run="${i.lastRunId}">Discard</button>
               </div>
             </div>`).join('')}
         </div>` : ''}
@@ -745,6 +811,7 @@ async function renderHome(force = false) {
   main.querySelectorAll('[data-page-link]').forEach((el) =>
     el.addEventListener('click', () => go(el.dataset.pageLink))
   )
+  wireCleanRoomButtons(main, () => renderHome(true))
   main.querySelectorAll('[data-decide]').forEach((btn) =>
     btn.addEventListener('click', async () => {
       const input = main.querySelector(`[data-decision-input="${btn.dataset.decide}"]`)
@@ -1241,15 +1308,17 @@ async function renderRuns() {
               <div class="grow">
                 <div class="title">${esc(r.routineName || repoName(r.projectPath))}
                   ${statusChip(r.status)}
+                  ${r.cleanRoom ? cleanRoomChip(r.cleanRoom) : ''}
                   ${(r.commits || []).slice(0, 3).map((c) => `<span class="chip mono">${icon('commit', 11)}${esc(c.sha)}</span>`).join('')}
                 </div>
-                <div class="sub mono">${esc(r.prompt.slice(0, 110))}</div>
+                <div class="sub mono">${esc(r.prompt.slice(0, 110))}${r.cleanRoom?.stat ? ` · ${esc(r.cleanRoom.stat)}` : ''}</div>
               </div>
               <span class="muted" style="font-size:12px;text-align:right;white-space:nowrap">
                 ${fmtTime(r.startedAt)}<br/>${fmtDuration(r.startedAt, r.endedAt)}${r.costUsd ? ` · $${r.costUsd.toFixed(2)}` : ''}
               </span>
               ${r.status === 'running' ? `<button class="btn small danger" data-stop="${r.id}">Stop</button>` : ''}
               ${r.status === 'awaiting-approval' ? `<button class="btn small" data-approve="${r.id}">Approve</button><button class="btn small danger" data-deny="${r.id}">Deny</button>` : ''}
+              ${r.status === 'succeeded' && r.cleanRoom?.state === 'open' ? `<button class="btn small primary" data-apply-run="${r.id}">Apply</button><button class="btn small danger" data-discard-run="${r.id}">Discard</button>` : ''}
             </div>`).join('')}
         </div>` : '<div class="box"><div class="empty">No runs yet.</div></div>'}
       <div id="run-detail"></div>
@@ -1262,6 +1331,7 @@ async function renderRuns() {
       renderRuns()
     })
   )
+  wireCleanRoomButtons(main, renderRuns)
   main.querySelectorAll('[data-approve]').forEach((el) =>
     el.addEventListener('click', async (e) => {
       e.stopPropagation()
@@ -1573,6 +1643,7 @@ const intentStatusChip = (status) =>
     converging: `<span class="chip green"><span class="dot green pulse"></span>converging</span>`,
     'decision-needed': `<span class="chip red">decision needed</span>`,
     'budget-paused': `<span class="chip" style="color:var(--attention);border-color:var(--attention)">over budget</span>`,
+    'fix-ready': `<span class="chip green">${icon('branch', 12)}fix ready</span>`,
     unknown: `<span class="chip">unknown</span>`,
   })[status] || `<span class="chip">not checked yet</span>`
 
@@ -1662,6 +1733,12 @@ async function openIntentModal(presetRepo = null) {
           <option value="1440">day</option>
         </select>
       </label>
+      <label class="field">When drifting
+        <select name="autonomy">
+          <option value="propose" selected>Propose — fix in a clean room, I review the diff</option>
+          <option value="apply">Apply — fix directly in my checkout</option>
+        </select>
+      </label>
       <div class="modal-actions">
         <button type="button" class="btn" data-close>Cancel</button>
         <button type="submit" class="btn primary">Create check</button>
@@ -1678,6 +1755,7 @@ async function openIntentModal(presetRepo = null) {
         builtin: fields.kind === 'custom' ? null : fields.kind,
         text: fields.kind === 'custom' ? fields.text : null,
         intervalMinutes: Number(fields.intervalMinutes),
+        autonomy: fields.autonomy || 'propose',
       },
     })
     render()

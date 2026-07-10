@@ -220,6 +220,72 @@ test('budget exhausted: intent pauses with one card, not one per cycle', async (
   rmSync(stores.home, { recursive: true, force: true })
 })
 
+test('a clean-room fix awaiting review reads as fix-ready, not drift', async () => {
+  const stores = tempStores()
+  const run = stores.runs.insert({
+    status: 'succeeded',
+    cleanRoom: { state: 'open', commitCount: 2, stat: '2 files changed' },
+  })
+  const intent = makeIntent(stores, { lastRunId: run.id, lastStatus: 'converging' })
+
+  let checked = false
+  const calls = []
+  let result = await reconcileIntent(stores, intent, {
+    check: async () => {
+      checked = true
+      return { status: 'drifting', detail: 'x' }
+    },
+    launch: fakeLaunch(calls),
+  })
+  assert.equal(result.lastStatus, 'fix-ready')
+  assert.equal(checked, false) // parked for review: no check, no relaunch
+  assert.equal(calls.length, 0)
+  assert.equal(result.failStreak, 0) // a waiting fix is not a failed attempt
+  assert.equal(stores.updates.list().filter((u) => u.kind === 'fix-ready').length, 1)
+
+  // Next cycle: still parked, no duplicate card.
+  await reconcileIntent(stores, stores.intents.get(intent.id), {
+    check: async () => ({ status: 'drifting', detail: 'x' }),
+    launch: fakeLaunch(calls),
+  })
+  assert.equal(stores.updates.list().filter((u) => u.kind === 'fix-ready').length, 1)
+  rmSync(stores.home, { recursive: true, force: true })
+})
+
+test('applied rooms verify on the real tree; discarded rooms count as a failed attempt', async () => {
+  const stores = tempStores()
+
+  const appliedRun = stores.runs.insert({ status: 'succeeded', cleanRoom: { state: 'applied', commitCount: 2 } })
+  const verified = makeIntent(stores, { lastRunId: appliedRun.id })
+  const afterApply = await reconcileIntent(stores, verified, {
+    check: async () => ({ status: 'holding', detail: 'green again' }),
+  })
+  assert.equal(afterApply.lastStatus, 'holding')
+  assert.equal(afterApply.failStreak, 0)
+
+  const discardedRun = stores.runs.insert({ status: 'succeeded', cleanRoom: { state: 'discarded', commitCount: 2 } })
+  const rejected = makeIntent(stores, { lastRunId: discardedRun.id })
+  const afterDiscard = await reconcileIntent(stores, rejected, {
+    check: async () => ({ status: 'drifting', detail: 'still red' }),
+    launch: fakeLaunch([]),
+  })
+  assert.equal(afterDiscard.failStreak, 1) // the human rejected it — that attempt failed
+  rmSync(stores.home, { recursive: true, force: true })
+})
+
+test('propose intents converge in a clean room; apply intents in the checkout', async () => {
+  const stores = tempStores()
+  const calls = []
+  const drift = { check: async () => ({ status: 'drifting', detail: 'red' }), launch: fakeLaunch(calls) }
+
+  await reconcileIntent(stores, makeIntent(stores, { autonomy: 'propose' }), drift)
+  assert.equal(calls[0].isolation, 'worktree')
+
+  await reconcileIntent(stores, makeIntent(stores, { autonomy: 'apply' }), drift)
+  assert.equal(calls[1].isolation, null)
+  rmSync(stores.home, { recursive: true, force: true })
+})
+
 test('every builtin has a label, check, and fix prompt', () => {
   for (const [id, b] of Object.entries(BUILTINS)) {
     assert.ok(b.label, id)

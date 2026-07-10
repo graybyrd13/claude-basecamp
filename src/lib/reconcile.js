@@ -146,6 +146,31 @@ export async function reconcileIntent(stores, intent, deps = {}) {
     return stores.intents.get(intent.id)
   }
 
+  // A clean-room fix is parked on its branch awaiting review. That is not
+  // drift and not a failed attempt — surface it once and wait for the human.
+  // Applied rooms fall through to a fresh check (the fix must hold on the
+  // real tree); discarded and empty rooms fall through and count as a failed
+  // attempt via the normal drift accounting.
+  if (liveRun?.status === 'succeeded' && liveRun.cleanRoom?.state === 'open' && liveRun.cleanRoom.commitCount > 0) {
+    if (intent.lastStatus !== 'fix-ready') {
+      const count = liveRun.cleanRoom.commitCount
+      stores.updates.insert({
+        kind: 'fix-ready',
+        intentId: intent.id,
+        runId: liveRun.id,
+        projectPath: intent.projectPath,
+        title: `Fix ready to review: "${intent.label}" in ${lastPathSegment(intent.projectPath)}`,
+        body: `${count} commit${count === 1 ? '' : 's'} waiting in a clean room${liveRun.cleanRoom.stat ? ` — ${liveRun.cleanRoom.stat}` : ''}`,
+      })
+      sendNotification(stores, {
+        title: `Fix ready in ${lastPathSegment(intent.projectPath)}`,
+        body: `${intent.label}: review the clean-room commits, then apply or discard.`,
+      }).catch(() => {})
+    }
+    stores.intents.update(intent.id, { lastCheck: Date.now(), lastStatus: 'fix-ready' })
+    return stores.intents.get(intent.id)
+  }
+
   const result = await check(intent)
   const now = Date.now()
 
@@ -244,6 +269,9 @@ export async function reconcileIntent(stores, intent, deps = {}) {
       routineName: `Intent: ${intent.label}`,
       allowedTools: builtin ? builtin.allowedTools : CONVERGENCE_ALLOWED,
       intentId: intent.id,
+      // 'propose' converges in a clean room and hands you a diff to review;
+      // 'apply' (the classic mode) works directly in the checkout.
+      isolation: intent.autonomy === 'propose' ? 'worktree' : null,
     })
     stores.intents.update(intent.id, { lastCheck: now, lastStatus: 'converging', lastDetail: result.detail, lastRunId: run.id, failStreak, nextConvergeAt: null })
   } catch (err) {
@@ -275,6 +303,7 @@ export function intentReport(stores) {
     drifting: intents.filter((i) => i.lastStatus === 'drifting').length,
     converging: intents.filter((i) => i.lastStatus === 'converging').length,
     budgetPaused: intents.filter((i) => i.lastStatus === 'budget-paused').length,
+    fixReady: intents.filter((i) => i.lastStatus === 'fix-ready'),
     decisions: intents.filter((i) => i.lastStatus === 'decision-needed'),
     unknown: intents.filter((i) => !i.lastStatus || i.lastStatus === 'unknown').length,
   }
