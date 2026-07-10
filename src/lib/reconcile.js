@@ -4,6 +4,7 @@ import { launchRun } from './runner.js'
 import { checkTestsGreen, checkDepsFresh, checkBacklog } from './checks.js'
 import { sendNotification } from './notify.js'
 import { lastPathSegment } from './paths.js'
+import { recordNotification } from './notifications.js'
 import { sanitizedEnv } from './env.js'
 import { admitRun, backoffUntil, monthKey } from './governor.js'
 import { getSettings } from './settings.js'
@@ -120,6 +121,9 @@ function escalate(stores, intent, detail) {
   sendNotification(stores, {
     title: `Decision needed in ${lastPathSegment(intent.projectPath)}`,
     body: `${intent.label}: ${detail}`.slice(0, 300),
+    type: 'escalation',
+    projectPath: intent.projectPath,
+    intentId: intent.id,
   }).catch(() => {})
 }
 
@@ -166,6 +170,12 @@ export async function reconcileIntent(stores, intent, deps = {}) {
       sendNotification(stores, {
         title: `Fix ready in ${lastPathSegment(intent.projectPath)}`,
         body: `${intent.label}: review the clean-room commits, then apply or discard.`,
+        // Closest fit in the notification inbox's type set: it's a call to
+        // action just like a decision-needed escalation.
+        type: 'escalation',
+        projectPath: intent.projectPath,
+        intentId: intent.id,
+        runId: liveRun.id,
       }).catch(() => {})
     }
     stores.intents.update(intent.id, { lastCheck: Date.now(), lastStatus: 'fix-ready' })
@@ -176,6 +186,17 @@ export async function reconcileIntent(stores, intent, deps = {}) {
   const now = Date.now()
 
   if (result.status === 'holding') {
+    // Only notify on recovery (was drifting/decision-needed/etc.) — a
+    // steady-state pass every tick would drown the inbox in noise.
+    if (intent.lastStatus && intent.lastStatus !== 'holding') {
+      recordNotification(stores, {
+        type: 'check-held',
+        projectPath: intent.projectPath,
+        intentId: intent.id,
+        title: `"${intent.label}" is holding again in ${lastPathSegment(intent.projectPath)}`,
+        body: result.detail,
+      })
+    }
     stores.intents.update(intent.id, { lastCheck: now, lastStatus: 'holding', lastDetail: result.detail, failStreak: 0, lastRunId: null, nextConvergeAt: null })
     return stores.intents.get(intent.id)
   }
@@ -189,9 +210,22 @@ export async function reconcileIntent(stores, intent, deps = {}) {
     return stores.intents.get(intent.id)
   }
 
-  // Drifting. Account the previous convergence attempt exactly once: seeing
-  // lastRunId here means that attempt ran and the intent still drifts, so
-  // every exit below clears lastRunId (the launch path sets a fresh one).
+  // Drifting. Notify only on the transition into drift — every subsequent
+  // tick keeps lastStatus 'drifting' (or 'converging' mid-fix), so this fires
+  // once per drift episode instead of every reconcile cycle.
+  if (intent.lastStatus !== 'drifting') {
+    recordNotification(stores, {
+      type: 'check-drift',
+      projectPath: intent.projectPath,
+      intentId: intent.id,
+      title: `"${intent.label}" is drifting in ${lastPathSegment(intent.projectPath)}`,
+      body: result.detail,
+    })
+  }
+
+  // Account the previous convergence attempt exactly once: seeing lastRunId
+  // here means that attempt ran and the intent still drifts, so every exit
+  // below clears lastRunId (the launch path sets a fresh one).
   const settings = getSettings(stores)
   const attemptFailed = Boolean(intent.lastRunId)
   const failStreak = attemptFailed ? (intent.failStreak || 0) + 1 : intent.failStreak || 0
@@ -243,6 +277,9 @@ export async function reconcileIntent(stores, intent, deps = {}) {
       sendNotification(stores, {
         title: `Budget paused in ${lastPathSegment(intent.projectPath)}`,
         body: `${intent.label}: ${verdict.reason}`.slice(0, 300),
+        type: 'escalation',
+        projectPath: intent.projectPath,
+        intentId: intent.id,
       }).catch(() => {})
     }
     stores.intents.update(intent.id, {

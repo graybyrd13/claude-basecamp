@@ -4,6 +4,8 @@ import { homedir } from 'node:os'
 import { createInterface } from 'node:readline'
 import { sanitizedEnv } from './env.js'
 import { ALLOWED_PERMISSION_MODES, EFFORT_LEVELS, MODEL_NAME_PATTERN } from './runner.js'
+import { recordNotification } from './notifications.js'
+import { lastPathSegment } from './paths.js'
 
 const CHAT_TIMEOUT_MS = 10 * 60 * 1000
 
@@ -167,6 +169,19 @@ export function sendChatMessage(stores, { projectPath, message, port, model, per
 
   const timeout = setTimeout(() => child.kill('SIGTERM'), CHAT_TIMEOUT_MS)
 
+  // The manager can keep running after the user navigates away (the client's
+  // streaming fetch is only how events reach the page while it's open) — this
+  // is exactly the case the notification inbox exists for.
+  const notifyManagerMessage = (text) => {
+    if (!text) return
+    recordNotification(stores, {
+      type: 'manager-message',
+      projectPath: isGlobal ? null : projectPath,
+      title: isGlobal ? 'Manager replied' : `Manager replied in ${lastPathSegment(projectPath)}`,
+      body: text.slice(0, 300),
+    })
+  }
+
   return new Promise((resolve) => {
     let sessionId = manager.sessionId || null
     let stderrTail = ''
@@ -211,6 +226,7 @@ export function sendChatMessage(stores, { projectPath, message, port, model, per
       const fullText = assistantParts.join('\n\n')
       if (fullText) {
         stores.messages.insert({ projectPath, role: 'assistant', text: fullText })
+        notifyManagerMessage(fullText)
       }
       onEvent({ type: 'done', error: errorText || null })
       resolve()
@@ -222,6 +238,7 @@ export function sendChatMessage(stores, { projectPath, message, port, model, per
           ? 'claude CLI not found on PATH — install Claude Code first'
           : err.message
       stores.messages.insert({ projectPath, role: 'assistant', text: `⚠️ ${msg}` })
+      notifyManagerMessage(`⚠️ ${msg}`)
       onEvent({ type: 'text', text: `⚠️ ${msg}` })
       finish(msg)
     })
@@ -230,6 +247,7 @@ export function sendChatMessage(stores, { projectPath, message, port, model, per
       if (code !== 0 && assistantParts.length === 0) {
         const msg = `Manager exited with code ${code}${stderrTail ? `: ${stderrTail.trim().slice(-300)}` : ''}`
         stores.messages.insert({ projectPath, role: 'assistant', text: `⚠️ ${msg}` })
+        notifyManagerMessage(`⚠️ ${msg}`)
         onEvent({ type: 'text', text: `⚠️ ${msg}` })
         return finish(msg)
       }

@@ -26,6 +26,7 @@ import { manifestStatus, adoptManifest, dropManifest, writeManifest } from './li
 import { createRecall } from './lib/recall.js'
 import { installReflexHook, uninstallReflexHook, reflexHookInstalled } from './lib/hook-installer.js'
 import { sendNotification } from './lib/notify.js'
+import { markRead, markAllRead } from './lib/notifications.js'
 import { randomBytes } from 'node:crypto'
 
 const PUBLIC_DIR = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'public')
@@ -373,6 +374,21 @@ async function handleApi(req, res, url, ctx) {
         body: 'Basecamp can reach you here.',
       })
       return json(res, 200, { results })
+    }
+
+    // ---------- notification inbox (durable, visible from every tab) ----------
+    if (route === '/api/notifications' && method === 'GET') {
+      const notifications = stores.notifications.list()
+      return json(res, 200, { notifications, unreadCount: notifications.filter((n) => !n.read).length })
+    }
+    if (route === '/api/notifications/read-all' && method === 'POST') {
+      return json(res, 200, { count: markAllRead(stores) })
+    }
+    const notificationMatch = route.match(/^\/api\/notifications\/([\w-]+)\/read$/)
+    if (notificationMatch && method === 'POST') {
+      const updated = markRead(stores, notificationMatch[1])
+      if (!updated) return json(res, 404, { error: 'Notification not found' })
+      return json(res, 200, updated)
     }
 
     // ---------- incoming webhooks (fire a routine from CI etc.) ----------

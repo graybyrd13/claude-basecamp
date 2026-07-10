@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { getSettings } from './settings.js'
 import { lastPathSegment } from './paths.js'
+import { recordNotification } from './notifications.js'
 
 const FETCH_TIMEOUT_MS = 8000
 
@@ -23,10 +24,15 @@ function post(url, body) {
  * failures are collected and returned but never thrown, so a dead webhook
  * can't break a run.
  */
-export async function sendNotification(stores, { title, body }) {
+export async function sendNotification(stores, { title, body, type = null, projectPath = null, runId = null, intentId = null }) {
   const settings = getSettings(stores)
   const text = body ? `${title}\n${body}` : title
   const attempts = []
+
+  // Additive: the in-app inbox persists alongside outward channels whenever a
+  // caller identifies what kind of event this is. Callers that don't (e.g.
+  // the Settings page's "send test notification") intentionally skip it.
+  if (type) recordNotification(stores, { type, projectPath, title, body, runId, intentId })
 
   if (settings.slackWebhook) {
     attempts.push(

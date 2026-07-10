@@ -27,6 +27,7 @@ function tempStores() {
     home,
     managers: new Store(home, 'managers'),
     messages: new Store(home, 'messages'),
+    notifications: new Store(home, 'notifications'),
   }
 }
 

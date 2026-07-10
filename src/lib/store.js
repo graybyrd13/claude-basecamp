@@ -88,5 +88,6 @@ export function openStores(home = resolveBasecampHome()) {
     reflex: new Store(home, 'reflex'),
     ledger: new Store(home, 'ledger'),
     manifests: new Store(home, 'manifests'),
+    notifications: new Store(home, 'notifications'),
   }
 }

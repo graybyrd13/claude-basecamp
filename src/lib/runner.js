@@ -8,6 +8,7 @@ import { notifyRunFinished, sendNotification } from './notify.js'
 import { lastPathSegment } from './paths.js'
 import { ledgerBump } from './governor.js'
 import { createCleanRoom, cleanRoomDiff } from './cleanroom.js'
+import { recordNotification } from './notifications.js'
 
 const DEFAULT_TIMEOUT_MINUTES = 30
 const OUTPUT_TAIL_CHARS = 4000
@@ -329,14 +330,25 @@ function recordRunUpdate(stores, run) {
   const projectName = lastPathSegment(run.projectPath)
   const kind = run.status === 'succeeded' ? 'run-succeeded' : run.status === 'denied' ? 'run-denied' : 'run-failed'
   const verb = run.status === 'succeeded' ? 'finished' : run.status === 'denied' ? 'was denied' : 'failed'
+  const title = `${label} ${verb} in ${projectName}`
+  const body = run.resultText || run.error || null
   stores.updates.insert({
     kind,
     runId: run.id,
     projectPath: run.projectPath,
-    title: `${label} ${verb} in ${projectName}`,
-    body: run.resultText || run.error || null,
+    title,
+    body,
     costUsd: run.costUsd,
     commits: run.commits || [],
+  })
+  // Always in-app, unlike the outward channel below: a run's outcome is the
+  // whole point of the inbox and must not be gated by "notify on success".
+  recordNotification(stores, {
+    type: run.status === 'succeeded' ? 'run-succeeded' : 'run-failed',
+    projectPath: run.projectPath,
+    title,
+    body,
+    runId: run.id,
   })
   notifyRunFinished(stores, run)
 }
@@ -359,6 +371,9 @@ function recordAwaitingApproval(stores, run) {
   sendNotification(stores, {
     title: `${label} needs approval in ${projectName}`,
     body: requested,
+    type: 'run-awaiting-approval',
+    projectPath: run.projectPath,
+    runId: run.id,
   }).catch(() => {})
 }
 

@@ -2287,6 +2287,98 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') pickPalette(palette.selected)
 })
 
+/* ---------- notification inbox (global, visible from any tab) ---------- */
+
+const notifIconFor = (type) =>
+  ({
+    'run-succeeded': 'check',
+    'run-failed': 'x',
+    'run-awaiting-approval': 'clock',
+    'check-drift': 'pulse',
+    'check-held': 'check',
+    escalation: 'shield',
+    'manager-message': 'chat',
+  })[type] || 'pulse'
+
+let notifState = { items: [], unreadCount: 0 }
+
+function setNotifBadge(count) {
+  const badge = $('#notif-badge')
+  if (!badge) return
+  badge.classList.toggle('hidden', count === 0)
+  badge.textContent = count > 99 ? '99+' : String(count)
+}
+
+async function refreshNotifications() {
+  try {
+    const { notifications, unreadCount } = await api('/api/notifications')
+    notifState = { items: notifications, unreadCount }
+    setNotifBadge(unreadCount)
+    if (!$('#notif-panel').classList.contains('hidden')) renderNotifPanel()
+  } catch { /* server briefly unavailable */ }
+}
+
+function renderNotifPanel() {
+  const panel = $('#notif-panel')
+  panel.innerHTML = `
+    <div class="notif-head">
+      Notifications
+      <span style="flex:1"></span>
+      ${notifState.unreadCount ? `<button class="btn small" id="notif-read-all">Mark all read</button>` : ''}
+    </div>
+    ${notifState.items.length ? notifState.items.slice(0, 50).map((n) => `
+      <div class="notif-item ${n.read ? '' : 'unread'}" data-notif="${n.id}">
+        <span class="n-dot"></span>
+        <div class="n-body">
+          <div class="n-title">${icon(notifIconFor(n.type), 12)}${esc(n.title)}</div>
+          ${n.body ? `<div class="n-text">${esc(n.body)}</div>` : ''}
+          <div class="n-time">${fmtTime(n.createdAt)}</div>
+        </div>
+      </div>`).join('') : '<div class="empty">No notifications yet.</div>'}`
+  panel.querySelectorAll('[data-notif]').forEach((el) =>
+    el.addEventListener('click', () => openNotification(el.dataset.notif))
+  )
+  $('#notif-read-all')?.addEventListener('click', async (e) => {
+    e.stopPropagation()
+    await api('/api/notifications/read-all', { method: 'POST' })
+    await refreshNotifications()
+  })
+}
+
+async function openNotification(id) {
+  const notif = notifState.items.find((n) => n.id === id)
+  if (!notif) return
+  if (!notif.read) {
+    api(`/api/notifications/${id}/read`, { method: 'POST' }).catch(() => {})
+    notif.read = true
+    notifState.unreadCount = Math.max(0, notifState.unreadCount - 1)
+    setNotifBadge(notifState.unreadCount)
+  }
+  closeNotifPanel()
+  if (notif.runId) { state.runId = notif.runId; go('runs') }
+  else if (notif.intentId) go('intents')
+  else go('chat')
+}
+
+function toggleNotifPanel() {
+  const panel = $('#notif-panel')
+  const opening = panel.classList.contains('hidden')
+  panel.classList.toggle('hidden')
+  if (opening) renderNotifPanel()
+}
+function closeNotifPanel() {
+  $('#notif-panel').classList.add('hidden')
+}
+$('#notif-trigger').addEventListener('click', (e) => {
+  e.stopPropagation()
+  toggleNotifPanel()
+})
+document.addEventListener('click', (e) => {
+  const panel = $('#notif-panel')
+  if (panel.classList.contains('hidden')) return
+  if (!e.target.closest('#notif-panel') && !e.target.closest('#notif-trigger')) closeNotifPanel()
+})
+
 /* ---------- navigation + polling ---------- */
 
 const pages = {
@@ -2367,8 +2459,10 @@ async function refreshSidebarRepos() {
 renderNav()
 render()
 refreshSidebarRepos()
+refreshNotifications()
 setInterval(() => {
   refreshSidebarRepos()
+  refreshNotifications()
   if (!$('#modal-backdrop').classList.contains('hidden') || palette.open) return
   if (userIsTyping()) return
   if (state.page === 'home') renderHome().catch(() => {})

@@ -36,6 +36,7 @@ function tempStores() {
     updates: new Store(home, 'updates'),
     settings: new Store(home, 'settings'),
     ledger: new Store(home, 'ledger'),
+    notifications: new Store(home, 'notifications'),
   }
 }
 
