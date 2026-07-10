@@ -7,6 +7,7 @@ import { lastPathSegment } from './paths.js'
 import { sanitizedEnv } from './env.js'
 import { admitRun, backoffUntil, monthKey } from './governor.js'
 import { getSettings } from './settings.js'
+import { watchManifests } from './manifest.js'
 
 const TICK_MS = 60 * 1000
 const DEFAULT_INTERVAL_MINUTES = 120
@@ -311,6 +312,13 @@ export function intentReport(stores) {
 
 export function startReconciler(stores) {
   const timer = setInterval(() => {
+    // Adopted manifests are checked for drift from their consented hash
+    // before intents run — an edited manifest pauses until re-adopted.
+    try {
+      watchManifests(stores, BUILTINS)
+    } catch {
+      /* a broken manifest never stops the loop */
+    }
     reconcileDue(stores).catch(() => {})
   }, TICK_MS)
   timer.unref()

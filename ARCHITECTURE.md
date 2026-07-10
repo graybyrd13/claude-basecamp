@@ -20,7 +20,7 @@ catalog.json             The community catalog (fetched live from main by every 
 - `lib/projects.js` — real repo paths from the `~/.claude.json` registry, grouped by git repo root (worktrees and working subdirs fold into their repo; scratch dirs drop)
 - `lib/agents.js`, `lib/connectors.js`, `lib/usage.js` — agents, MCP servers, token aggregation
 
-**Basecamp's own state** lives in `~/.claude-basecamp/` via `lib/store.js` — a tiny JSON-collection store (insert/update/remove, temp-file + rename writes). Collections: routines, runs, updates, goals, managers, messages, settings, intents (checks), antibodies, reflex, ledger (monthly spend).
+**Basecamp's own state** lives in `~/.claude-basecamp/` via `lib/store.js` — a tiny JSON-collection store (insert/update/remove, temp-file + rename writes). Collections: routines, runs, updates, goals, managers, messages, settings, intents (checks), antibodies, reflex, ledger (monthly spend), manifests (adoption consents).
 
 ## The engines
 
@@ -30,6 +30,7 @@ catalog.json             The community catalog (fetched live from main by every 
 - `lib/reconcile.js` + `lib/checks.js` — **Checks**: deterministic drift detection (real test suite, `npm outdated`, `gh`) or plain-English evaluation, convergence runs on failure, escalation to decision cards. Bounded: concurrency cap, daily attempt cap, exponential backoff per check
 - `lib/governor.js` — **Budgets**: every run's CLI-reported cost accrues into a durable monthly ledger; global and per-repo dollar caps gate autonomous launches (checks and routines). Over budget, work pauses with a decision card — manual runs are never blocked
 - `lib/cleanroom.js` — **Clean rooms**: runs execute in disposable git worktrees on their own branches; commits come back as a reviewable diff with apply (ff/merge, conflict-safe abort) and discard. Boot sweep prunes settled rooms
+- `lib/manifest.js` — **Manifests**: `.basecamp/manifest.json` declares a repo's checks as code. Adoption is explicit and hash-pinned; changed manifests pause their checks until re-adopted; export shares your checks with everyone who clones
 - `lib/rescue.js` — **Session Rescue**: classifies how transcripts ended; resumes dead sessions
 - `lib/immune.js` + `lib/hook-installer.js` — **Reflexes**: mines transcripts for human pushback into antibodies; an opt-in PreToolUse hook makes every session consult `/api/reflex/hook` before mutating actions
 - `lib/catalog.js` — one-click installs; remote catalog with bundled fallback, trusted-repo allowlist

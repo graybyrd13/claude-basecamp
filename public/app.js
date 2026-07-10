@@ -1648,9 +1648,13 @@ const intentStatusChip = (status) =>
   })[status] || `<span class="chip">not checked yet</span>`
 
 async function renderIntents() {
-  const intents = await api('/api/intents')
+  const [intents, manifests] = await Promise.all([
+    api('/api/intents'),
+    api('/api/manifests').catch(() => []),
+  ])
   const byRepo = {}
   for (const intent of intents) (byRepo[intent.projectPath] ||= []).push(intent)
+  const manifestBanners = manifests.filter((m) => (m.present && !m.adopted) || m.changed || m.error)
 
   main.innerHTML = `
     <div class="page">
@@ -1658,13 +1662,32 @@ async function renderIntents() {
         <div><h1>Checks</h1><p class="subtitle">Standing checks on your repositories. Basecamp verifies them continuously, fixes failures itself, and asks you only when a human call is needed.</p></div>
         <button class="btn primary" id="new-intent">New check</button>
       </div>
+      ${manifestBanners.map((m) => `
+        <div class="digest" style="border-left-color:${m.error ? 'var(--red)' : 'var(--attention)'}">
+          <div class="d-head">${icon('repo', 15)} ${esc(repoName(m.path))}
+            <span class="muted" style="font-weight:400">
+              ${m.error
+                ? `manifest error: ${esc(m.error)}`
+                : m.changed
+                  ? 'manifest changed since you adopted it — its checks are paused'
+                  : `declares ${m.manifest.intents.length} check${m.manifest.intents.length === 1 ? '' : 's'} in .basecamp/manifest.json`}
+            </span>
+            <span style="margin-left:auto;display:flex;gap:6px">
+              ${!m.error ? `<button class="btn small primary" data-adopt-manifest="${esc(m.path)}">${m.changed ? 'Review & re-adopt' : 'Adopt'}</button>` : ''}
+              ${m.adopted ? `<button class="btn small danger" data-drop-manifest="${esc(m.path)}">Drop</button>` : ''}
+            </span>
+          </div>
+          ${!m.error && m.manifest ? `<ul>${m.manifest.intents.map((i) => `<li>${esc(i.builtin ? i.builtin : i.text)} <span class="muted">· every ${i.intervalMinutes}m · ${i.autonomy}</span></li>`).join('')}</ul>` : ''}
+        </div>`).join('')}
       ${intents.length ? Object.entries(byRepo).map(([path, list]) => `
         <div class="box">
-          <div class="box-head">${icon('repo', 14)} ${esc(repoName(path))}</div>
+          <div class="box-head">${icon('repo', 14)} ${esc(repoName(path))}
+            <button class="btn small" style="margin-left:auto" data-export-manifest="${esc(path)}" title="Write these checks to .basecamp/manifest.json so anyone who clones this repo can adopt them">Export manifest</button>
+          </div>
           ${list.map((i) => `
             <div class="row">
               <div class="grow">
-                <div class="title">${esc(i.label)} ${intentStatusChip(i.enabled ? i.lastStatus : 'paused')} ${!i.enabled ? '<span class="chip">paused</span>' : ''}</div>
+                <div class="title">${esc(i.label)} ${intentStatusChip(i.enabled ? i.lastStatus : 'paused')} ${!i.enabled ? '<span class="chip">paused</span>' : ''} ${i.source === 'manifest' ? '<span class="chip">manifest</span>' : ''}</div>
                 <div class="sub">${i.lastDetail ? esc(i.lastDetail.split('\n')[0].slice(0, 120)) : 'Not checked yet'} · every ${i.intervalMinutes}m${i.lastCheck ? ` · checked ${fmtTime(i.lastCheck)}` : ''}</div>
               </div>
               <span style="white-space:nowrap;display:flex;gap:6px">
@@ -1700,6 +1723,36 @@ async function renderIntents() {
     el.addEventListener('click', async () => {
       if (!confirm('Delete this check?')) return
       await api(`/api/intents/${el.dataset.delIntent}`, { method: 'DELETE' })
+      renderIntents()
+    })
+  )
+  main.querySelectorAll('[data-adopt-manifest]').forEach((el) =>
+    el.addEventListener('click', async () => {
+      if (!confirm('Adopt this manifest? Its checks will run on the schedule it declares, with the autonomy it declares. You can drop it any time.')) return
+      el.disabled = true
+      try {
+        await api('/api/manifest/adopt', { method: 'POST', body: { path: el.dataset.adoptManifest } })
+      } catch (err) {
+        alert(err.message)
+      }
+      renderIntents()
+    })
+  )
+  main.querySelectorAll('[data-drop-manifest]').forEach((el) =>
+    el.addEventListener('click', async () => {
+      if (!confirm('Drop this manifest? Its checks are removed (your own checks stay).')) return
+      await api('/api/manifest/drop', { method: 'POST', body: { path: el.dataset.dropManifest } })
+      renderIntents()
+    })
+  )
+  main.querySelectorAll('[data-export-manifest]').forEach((el) =>
+    el.addEventListener('click', async () => {
+      try {
+        const { file } = await api('/api/manifest/export', { method: 'POST', body: { path: el.dataset.exportManifest } })
+        alert(`Manifest written to ${file} — commit it and anyone who clones the repo can adopt these checks.`)
+      } catch (err) {
+        alert(err.message)
+      }
       renderIntents()
     })
   )

@@ -22,6 +22,7 @@ import { BUILTINS, reconcileIntent, intentReport, startReconciler } from './lib/
 import { mineAntibodies, reflexVerdict, immuneStats, bumpCounters } from './lib/immune.js'
 import { spendReport } from './lib/governor.js'
 import { applyCleanRoom, discardCleanRoom, cleanRoomPatch, sweepCleanRooms } from './lib/cleanroom.js'
+import { manifestStatus, adoptManifest, dropManifest, writeManifest } from './lib/manifest.js'
 import { installReflexHook, uninstallReflexHook, reflexHookInstalled } from './lib/hook-installer.js'
 import { sendNotification } from './lib/notify.js'
 import { randomBytes } from 'node:crypto'
@@ -295,6 +296,31 @@ async function handleApi(req, res, url, ctx) {
         res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
         return res.end(patch)
       }
+    }
+
+    // ---------- manifests (intents-as-code; adoption is explicit) ----------
+    if (route === '/api/manifests' && method === 'GET') {
+      const statuses = []
+      for (const repo of knownRepos(claudeDir, stores)) {
+        const status = manifestStatus(stores, repo.path, BUILTINS)
+        if (status.present || status.adopted) statuses.push({ path: repo.path, ...status })
+      }
+      return json(res, 200, statuses)
+    }
+    if (route === '/api/manifest/adopt' && method === 'POST') {
+      const body = await readBody(req)
+      if (!body.path) return json(res, 400, { error: 'path is required' })
+      return json(res, 200, adoptManifest(stores, body.path, BUILTINS))
+    }
+    if (route === '/api/manifest/drop' && method === 'POST') {
+      const body = await readBody(req)
+      if (!body.path) return json(res, 400, { error: 'path is required' })
+      return json(res, 200, dropManifest(stores, body.path))
+    }
+    if (route === '/api/manifest/export' && method === 'POST') {
+      const body = await readBody(req)
+      if (!body.path) return json(res, 400, { error: 'path is required' })
+      return json(res, 200, { file: writeManifest(stores, body.path) })
     }
 
     // ---------- settings & notifications ----------

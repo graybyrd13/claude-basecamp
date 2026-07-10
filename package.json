@@ -1,6 +1,6 @@
 {
   "name": "claude-basecamp",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Zero-config localhost dashboard for Claude Code \u2014 sessions, agents, usage, tasks, and connector management across Desktop, Terminal, and API.",
   "license": "Unlicense",
   "author": "Grayson Heim",
@@ -23,7 +23,7 @@
   "scripts": {
     "start": "node bin/basecamp.js",
     "dev": "node bin/basecamp.js --no-open",
-    "test": "node --test test/sessions.test.js test/agents-connectors.test.js test/server.test.js test/store-scheduler.test.js test/git.test.js test/runner.test.js test/chat.test.js test/paths.test.js test/catalog.test.js test/rescue.test.js test/reconcile.test.js test/immune.test.js test/projects-repos.test.js test/governor.test.js test/cleanroom.test.js"
+    "test": "node --test test/sessions.test.js test/agents-connectors.test.js test/server.test.js test/store-scheduler.test.js test/git.test.js test/runner.test.js test/chat.test.js test/paths.test.js test/catalog.test.js test/rescue.test.js test/reconcile.test.js test/immune.test.js test/projects-repos.test.js test/governor.test.js test/cleanroom.test.js test/manifest.test.js"
   },
   "keywords": [
     "claude",
