@@ -80,14 +80,25 @@ test('launchRun spawns claude with the expected args and reaches "succeeded"', a
     return child
   }
 
-  const run = launchRun(stores, { projectPath, prompt: 'do the thing' }, fakeSpawn)
+  const run = launchRun(stores, { projectPath, prompt: 'do the thing', model: 'opus', effort: 'low' }, fakeSpawn)
   assert.equal(run.status, 'running')
+  assert.equal(run.effort, 'low')
   assert.equal(spawnCalls[0].cmd, 'claude')
   assert.deepEqual(
     spawnCalls[0].args.slice(0, 4),
     ['-p', 'do the thing', '--output-format', 'stream-json']
   )
   assert.ok(spawnCalls[0].args.includes('--permission-mode'))
+  assert.equal(spawnCalls[0].args[spawnCalls[0].args.indexOf('--model') + 1], 'opus')
+  assert.equal(spawnCalls[0].args[spawnCalls[0].args.indexOf('--effort') + 1], 'low')
+  assert.throws(
+    () => launchRun(stores, { projectPath, prompt: 'x', effort: 'ultra' }, fakeSpawn),
+    /Invalid effort/
+  )
+  assert.throws(
+    () => launchRun(stores, { projectPath, prompt: 'x', model: 'opus; rm -rf /' }, fakeSpawn),
+    /Invalid model/
+  )
 
   await finishTurn(children[0], [
     { type: 'system', subtype: 'init', session_id: 'sess-1' },

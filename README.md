@@ -46,6 +46,8 @@ Reality is checked with deterministic local facts where possible (your actual te
 
 Managers remember everything across sessions — close the tab, come back tomorrow, it knows where you left off.
 
+Every chat, routine, and background run can pick its own model, effort level, and permission mode — the model list is discovered from the models you actually use on this machine, and each repo's chat remembers its last-used choice.
+
 **Routines** — scheduled prompts that run Claude Code headless in your projects (every N minutes, daily, weekly). Created in the UI or by asking a manager.
 
 **Background runs** — one-off tasks ("continue development", "fix the failing CI") that run without blocking anything, with live logs, cost tracking, and stop buttons.

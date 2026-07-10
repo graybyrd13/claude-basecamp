@@ -168,24 +168,77 @@ const PERMISSION_OPTIONS = `
   <option value="default">Default (may stall on prompts)</option>
   <option value="bypassPermissions">Bypass permissions (unattended, trusted repos)</option>`
 
-const MODEL_OPTIONS = `
-  <option value="sonnet">Sonnet (recommended for background work)</option>
-  <option value="haiku">Haiku (fastest, cheapest)</option>
-  <option value="opus">Opus (deepest reasoning)</option>
-  <option value="">Your Claude Code default</option>`
+// Models actually used on this machine (from /api/models), fetched once per page load.
+let modelDataPromise = null
+function getModelData() {
+  if (!modelDataPromise) {
+    modelDataPromise = api('/api/models').catch(() => ({
+      models: [],
+      efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    }))
+  }
+  return modelDataPromise
+}
 
-const modelPermissionFields = () => `
+const modelOptions = (models, selected = '') =>
+  `<option value="">Your Claude Code default</option>` +
+  models
+    .map((m) => `<option value="${esc(m.id)}" ${m.id === selected ? 'selected' : ''}>${esc(m.label)}</option>`)
+    .join('')
+
+const effortOptions = (efforts, selected = '') =>
+  `<option value="">Default effort</option>` +
+  efforts
+    .map((e) => `<option value="${esc(e)}" ${e === selected ? 'selected' : ''}>${esc(e)}</option>`)
+    .join('')
+
+const modelPermissionFields = ({ models, efforts }) => `
   <div class="field-row">
     <label class="field">Model
-      <select name="model">${MODEL_OPTIONS}</select>
+      <select name="model">${modelOptions(models)}</select>
+    </label>
+    <label class="field">Effort
+      <select name="effort">${effortOptions(efforts)}</select>
     </label>
     <label class="field">Permissions
       <select name="permissionMode">${PERMISSION_OPTIONS}</select>
     </label>
   </div>`
 
+/** Compact settings popover shared by the chat landing and HQ composers. */
+const chatSettingsPanel = ({ models, efforts }, variant = '') => `
+  <div class="chat-settings-anchor">
+    <button type="button" class="icon-btn" id="chat-settings-btn" title="Model, effort & permissions" aria-label="Chat settings">${icon('gear', 15)}</button>
+    <div class="chat-settings hidden ${variant}" id="chat-settings">
+      <label class="field">Model
+        <select id="chat-model">${modelOptions(models)}</select>
+      </label>
+      <label class="field">Effort
+        <select id="chat-effort">${effortOptions(efforts)}</select>
+      </label>
+      <label class="field">Permissions
+        <select id="chat-permission">${PERMISSION_OPTIONS}</select>
+      </label>
+    </div>
+  </div>`
+
+// One delegated listener drives the popover on both chat surfaces: the gear
+// toggles it, any click outside closes it. Renders swap #main's DOM, so a
+// per-render listener would stack — this one is installed once.
+document.addEventListener('click', (e) => {
+  const panel = $('#chat-settings')
+  if (!panel) return
+  if (e.target.closest('#chat-settings-btn')) {
+    panel.classList.toggle('hidden')
+    return
+  }
+  if (!panel.classList.contains('hidden') && !e.target.closest('#chat-settings')) {
+    panel.classList.add('hidden')
+  }
+})
+
 async function openTaskModal(repoPath = null, presetPrompt = '') {
-  const repos = await api('/api/projects')
+  const [repos, modelData] = await Promise.all([api('/api/projects'), getModelData()])
   openModal(`
     <h2>Run a background task</h2>
     <form id="task-form">
@@ -195,21 +248,24 @@ async function openTaskModal(repoPath = null, presetPrompt = '') {
       <label class="field">What should Claude do?
         <textarea name="prompt" required placeholder="e.g. Review TODO.md and continue development on the next unchecked item. Run the tests, and commit your work when they pass.">${esc(presetPrompt)}</textarea>
       </label>
-      ${modelPermissionFields()}
+      ${modelPermissionFields(modelData)}
       <div class="modal-actions">
         <button type="button" class="btn" data-close>Cancel</button>
         <button type="submit" class="btn primary">Run now</button>
       </div>
     </form>`)
   wireModalForm('#task-form', async (fields) => {
-    await api('/api/runs', { method: 'POST', body: { ...fields, model: fields.model || null } })
+    await api('/api/runs', {
+      method: 'POST',
+      body: { ...fields, model: fields.model || null, effort: fields.effort || null },
+    })
     go('runs')
   })
 }
 
 /** routine may be a saved routine (has .id → edit) or a template draft (no .id → create prefilled). */
 async function openRoutineModal(routine = null, presetRepo = null) {
-  const repos = await api('/api/projects')
+  const [repos, modelData] = await Promise.all([api('/api/projects'), getModelData()])
   const s = routine?.schedule || {}
   openModal(`
     <h2>${routine?.id ? 'Edit routine' : 'New routine'}</h2>
@@ -244,7 +300,7 @@ async function openRoutineModal(routine = null, presetRepo = null) {
           </select>
         </label>
       </div>
-      ${modelPermissionFields()}
+      ${modelPermissionFields(modelData)}
       <div class="modal-actions">
         <button type="button" class="btn" data-close>Cancel</button>
         <button type="submit" class="btn primary">${routine?.id ? 'Save' : 'Create routine'}</button>
@@ -252,6 +308,7 @@ async function openRoutineModal(routine = null, presetRepo = null) {
     </form>`)
   if (routine?.permissionMode) $('#routine-form [name=permissionMode]').value = routine.permissionMode
   if (routine) $('#routine-form [name=model]').value = routine.model || ''
+  if (routine) $('#routine-form [name=effort]').value = routine.effort || ''
   const syncScheduleFields = () => {
     const type = $('#schedule-type').value
     document.querySelectorAll('[data-sched]').forEach((el) => {
@@ -274,6 +331,7 @@ async function openRoutineModal(routine = null, presetRepo = null) {
       prompt: fields.prompt,
       permissionMode: fields.permissionMode,
       model: fields.model || null,
+      effort: fields.effort || null,
       schedule,
     }
     if (routine?.id) await api(`/api/routines/${routine.id}`, { method: 'PUT', body })
@@ -461,7 +519,8 @@ function gitChips(git) {
 /* ---------- Chat landing (default page) ---------- */
 
 async function renderChatHome() {
-  const repos = (await api('/api/projects')).filter((r) => r.exists)
+  const [allRepos, modelData] = await Promise.all([api('/api/projects'), getModelData()])
+  const repos = allRepos.filter((r) => r.exists)
   if (!state.chatRepo || !repos.find((r) => r.path === state.chatRepo)) {
     state.chatRepo = repos[0]?.path || null
   }
@@ -475,7 +534,8 @@ async function renderChatHome() {
       <div class="ch-box">
         <textarea id="ch-input" rows="3" placeholder="What are we working on?"></textarea>
         <div class="ch-row">
-          <select id="ch-repo">${repos.map((r) => `<option value="${esc(r.path)}" ${r.path === state.chatRepo ? 'selected' : ''}>${esc(repoName(r.path))}</option>`).join('')}</select>
+          <select id="ch-repo" class="pill-select">${repos.map((r) => `<option value="${esc(r.path)}" ${r.path === state.chatRepo ? 'selected' : ''}>${esc(repoName(r.path))}</option>`).join('')}</select>
+          ${chatSettingsPanel(modelData, 'drop-down')}
           <span style="flex:1"></span>
           <button class="btn primary" id="ch-send">Send</button>
         </div>
@@ -499,6 +559,11 @@ async function renderChatHome() {
       return name.length >= 3 && lower.includes(name)
     })
     state.pendingChatMessage = message
+    state.pendingChatPrefs = {
+      model: $('#chat-model').value || null,
+      effort: $('#chat-effort').value || null,
+      permissionMode: $('#chat-permission').value,
+    }
     openHQ(mentioned?.path || $('#ch-repo').value)
   }
   input.addEventListener('keydown', (e) => {
@@ -767,6 +832,7 @@ async function renderRepos() {
 
 async function renderHQ() {
   const path = state.hqRepo
+  const modelData = await getModelData()
   main.innerHTML = `
     <div class="hq">
       <div class="hq-head">
@@ -783,6 +849,7 @@ async function renderHQ() {
           </div>
           <div class="composer">
             <div class="composer-inner">
+              ${chatSettingsPanel(modelData)}
               <textarea id="chat-input" rows="1" placeholder="Message the manager…"></textarea>
               <button class="btn primary" id="chat-send">Send</button>
             </div>
@@ -814,6 +881,11 @@ async function renderHQ() {
   })
 
   await Promise.all([loadChatHistory(), renderHQRail()])
+  // A choice made on the chat landing page wins over the repo's last-used prefs.
+  if (state.pendingChatPrefs) {
+    applyChatPrefs(state.pendingChatPrefs.model, state.pendingChatPrefs.effort, state.pendingChatPrefs.permissionMode)
+    state.pendingChatPrefs = null
+  }
   if (state.pendingChatMessage) {
     input.value = state.pendingChatMessage
     state.pendingChatMessage = null
@@ -833,8 +905,9 @@ function chatBubble(role, html) {
 async function loadChatHistory() {
   const thread = $('#chat-thread')
   try {
-    const { messages, busy } = await api(`/api/chat/history?project=${encodeURIComponent(state.hqRepo)}`)
+    const { messages, busy, model, effort, permissionMode } = await api(`/api/chat/history?project=${encodeURIComponent(state.hqRepo)}`)
     state.chatBusy = busy
+    applyChatPrefs(model, effort, permissionMode)
     if (!messages.length) {
       thread.innerHTML = `
         <div class="empty">
@@ -857,6 +930,23 @@ function scrollChat() {
   if (scroller) scroller.scrollTop = scroller.scrollHeight
 }
 
+/** Preselect the repo's last-used chat prefs. An API-set model outside the
+ *  discovered list gets its own option rather than being silently clobbered. */
+function applyChatPrefs(model, effort, permissionMode) {
+  const modelSelect = $('#chat-model')
+  const effortSelect = $('#chat-effort')
+  const permissionSelect = $('#chat-permission')
+  if (!modelSelect || !effortSelect || !permissionSelect) return
+  const value = model || ''
+  modelSelect.value = value
+  if (modelSelect.value !== value) {
+    modelSelect.insertAdjacentHTML('beforeend', `<option value="${esc(value)}">${esc(value)}</option>`)
+    modelSelect.value = value
+  }
+  effortSelect.value = effort || ''
+  permissionSelect.value = permissionMode || 'acceptEdits'
+}
+
 async function sendChat() {
   const input = $('#chat-input')
   const message = input.value.trim()
@@ -876,7 +966,13 @@ async function sendChat() {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectPath: state.hqRepo, message }),
+      body: JSON.stringify({
+        projectPath: state.hqRepo,
+        message,
+        model: $('#chat-model')?.value || null,
+        effort: $('#chat-effort')?.value || null,
+        permissionMode: $('#chat-permission')?.value || 'acceptEdits',
+      }),
     })
     const reader = res.body.getReader()
     const decoder = new TextDecoder()

@@ -9,7 +9,12 @@ import { lastPathSegment } from './paths.js'
 
 const DEFAULT_TIMEOUT_MINUTES = 30
 const OUTPUT_TAIL_CHARS = 4000
-const ALLOWED_PERMISSION_MODES = new Set(['default', 'plan', 'acceptEdits', 'bypassPermissions'])
+export const ALLOWED_PERMISSION_MODES = new Set(['default', 'plan', 'acceptEdits', 'bypassPermissions'])
+// The claude CLI's --effort levels, in ascending order (see `claude --help`).
+export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
+// Aliases like "opus" and full ids like "claude-sonnet-5" — but nothing the
+// Windows shell path (spawn with shell: true) could reinterpret.
+export const MODEL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
 // In-memory registry of live child processes, keyed by run id.
 const liveProcesses = new Map()
@@ -20,7 +25,7 @@ const liveProcesses = new Map()
  * approveRun (resuming a run that paused on a permission wall) — both just
  * differ in the prompt/permission-mode/session they hand in.
  */
-function spawnTurn(stores, run, { prompt, permissionMode, model, timeoutMinutes, startShaPromise, resumeSessionId, allowedTools, spawnFn }) {
+function spawnTurn(stores, run, { prompt, permissionMode, model, effort, timeoutMinutes, startShaPromise, resumeSessionId, allowedTools, spawnFn }) {
   const logPath = join(stores.home, 'logs', `${run.id}.log`)
   const logStream = createWriteStream(logPath, { flags: 'a' })
   // Readline can flush buffered lines after the exit handler has ended the
@@ -34,6 +39,7 @@ function spawnTurn(stores, run, { prompt, permissionMode, model, timeoutMinutes,
   if (resumeSessionId) args.push('--resume', resumeSessionId)
   if (permissionMode !== 'default') args.push('--permission-mode', permissionMode)
   if (model) args.push('--model', model)
+  if (effort) args.push('--effort', effort)
   if (allowedTools && allowedTools.length) args.push('--allowedTools', allowedTools.join(','))
 
   const child = spawnFn('claude', args, {
@@ -143,6 +149,7 @@ export function launchRun(stores, options, spawnFn = spawn) {
     prompt,
     permissionMode = 'acceptEdits',
     model = null,
+    effort = null,
     routineId = null,
     routineName = null,
     timeoutMinutes = DEFAULT_TIMEOUT_MINUTES,
@@ -162,12 +169,19 @@ export function launchRun(stores, options, spawnFn = spawn) {
   if (!ALLOWED_PERMISSION_MODES.has(permissionMode)) {
     throw new Error(`Invalid permission mode: ${permissionMode}`)
   }
+  if (model !== null && (typeof model !== 'string' || !MODEL_NAME_PATTERN.test(model))) {
+    throw new Error(`Invalid model: ${model}`)
+  }
+  if (effort !== null && !EFFORT_LEVELS.includes(effort)) {
+    throw new Error(`Invalid effort: ${effort}`)
+  }
 
   const run = stores.runs.insert({
     projectPath,
     prompt,
     permissionMode,
     model,
+    effort,
     routineId,
     routineName,
     status: 'running',
@@ -191,6 +205,7 @@ export function launchRun(stores, options, spawnFn = spawn) {
     prompt,
     permissionMode,
     model,
+    effort,
     timeoutMinutes,
     startShaPromise,
     resumeSessionId,
@@ -240,6 +255,7 @@ export function approveRun(stores, runId, options = {}, spawnFn = spawn) {
     prompt,
     permissionMode: 'bypassPermissions',
     model: run.model,
+    effort: run.effort,
     timeoutMinutes: DEFAULT_TIMEOUT_MINUTES,
     startShaPromise,
     resumeSessionId: run.sessionId,

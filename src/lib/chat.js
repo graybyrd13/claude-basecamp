@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { sanitizedEnv } from './env.js'
+import { ALLOWED_PERMISSION_MODES, EFFORT_LEVELS, MODEL_NAME_PATTERN } from './runner.js'
 
 const CHAT_TIMEOUT_MS = 10 * 60 * 1000
 
@@ -39,6 +40,7 @@ curl -s -X DELETE ${api}/goals/<id>
 
 # One-off background run (long task without blocking this chat)
 curl -s -X POST ${api}/runs -H 'Content-Type: application/json' -d '{"projectPath":"${projectPath}","prompt":"<task>","permissionMode":"acceptEdits","model":"sonnet"}'
+# routines and runs both accept "model" (any Claude alias or full id) and optional "effort": low|medium|high|xhigh|max
 curl -s ${api}/runs   # check statuses
 
 # Checks — standing conditions Basecamp continuously enforces (verifies reality, fixes failures, escalates decisions). API routes say 'intents'.
@@ -70,33 +72,60 @@ Guidelines:
  * manager's persistent session when one exists) and forwards parsed events to
  * onEvent as they arrive. Persists the exchange to the messages store.
  * Returns a promise that resolves when the turn completes.
+ *
+ * model/effort/permissionMode are sticky per repo: an omitted field inherits
+ * the repo's last-used value; an explicit value (including null for "your
+ * Claude Code default") overwrites it.
  */
-export function sendChatMessage(stores, { projectPath, message, port }, onEvent) {
+export function sendChatMessage(stores, { projectPath, message, port, model, permissionMode, effort }, onEvent, spawnFn = spawn) {
   if (!projectPath || !existsSync(projectPath)) {
     throw new Error(`Project path does not exist: ${projectPath}`)
   }
   if (!message || !message.trim()) throw new Error('Message is required')
   if (liveChats.has(projectPath)) throw new Error('Manager is still working on the previous message')
 
-  const manager = stores.managers.list().find((m) => m.projectPath === projectPath) || null
+  let manager = stores.managers.list().find((m) => m.projectPath === projectPath) || null
+  const chatModel = model === undefined ? manager?.model ?? null : model
+  const chatEffort = effort === undefined ? manager?.effort ?? null : effort
+  const chatPermissionMode = permissionMode === undefined ? manager?.permissionMode ?? 'acceptEdits' : permissionMode
+  if (!ALLOWED_PERMISSION_MODES.has(chatPermissionMode)) {
+    throw new Error(`Invalid permission mode: ${chatPermissionMode}`)
+  }
+  if (chatModel !== null && (typeof chatModel !== 'string' || !MODEL_NAME_PATTERN.test(chatModel))) {
+    throw new Error(`Invalid model: ${chatModel}`)
+  }
+  if (chatEffort !== null && !EFFORT_LEVELS.includes(chatEffort)) {
+    throw new Error(`Invalid effort: ${chatEffort}`)
+  }
+
   stores.messages.insert({ projectPath, role: 'user', text: message })
 
-  // acceptEdits alone denies Bash in headless mode, which would cut the manager
-  // off from the Basecamp API cookbook — so curl is explicitly allowlisted.
+  // Persist the choice up front so the dashboard can preselect it next visit,
+  // even if this turn dies before producing a session id.
+  const prefs = { model: chatModel, effort: chatEffort, permissionMode: chatPermissionMode, updatedAt: Date.now() }
+  manager = manager
+    ? stores.managers.update(manager.id, prefs)
+    : stores.managers.insert({ projectPath, sessionId: null, ...prefs })
+
+  // Headless mode denies Bash without an explicit grant in every permission
+  // mode short of bypass, which would cut the manager off from the Basecamp
+  // API cookbook — so curl is always allowlisted.
   const args = [
     '-p', message,
     '--output-format', 'stream-json',
     '--verbose',
-    '--permission-mode', 'acceptEdits',
+    '--permission-mode', chatPermissionMode,
     '--allowedTools', 'Bash(curl:*)',
   ]
-  if (manager?.sessionId) {
+  if (chatModel) args.push('--model', chatModel)
+  if (chatEffort) args.push('--effort', chatEffort)
+  if (manager.sessionId) {
     args.push('--resume', manager.sessionId)
   }
   // System prompt is appended every turn: cheap, and it survives session loss.
   args.push('--append-system-prompt', managerSystemPrompt(projectPath, port))
 
-  const child = spawn('claude', args, {
+  const child = spawnFn('claude', args, {
     cwd: projectPath,
     env: sanitizedEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -109,7 +138,7 @@ export function sendChatMessage(stores, { projectPath, message, port }, onEvent)
   const timeout = setTimeout(() => child.kill('SIGTERM'), CHAT_TIMEOUT_MS)
 
   return new Promise((resolve) => {
-    let sessionId = manager?.sessionId || null
+    let sessionId = manager.sessionId || null
     let stderrTail = ''
     const assistantParts = []
 
@@ -148,10 +177,7 @@ export function sendChatMessage(stores, { projectPath, message, port }, onEvent)
     const finish = (errorText) => {
       clearTimeout(timeout)
       liveChats.delete(projectPath)
-      if (sessionId) {
-        if (manager) stores.managers.update(manager.id, { sessionId, updatedAt: Date.now() })
-        else stores.managers.insert({ projectPath, sessionId, updatedAt: Date.now() })
-      }
+      if (sessionId) stores.managers.update(manager.id, { sessionId, updatedAt: Date.now() })
       const fullText = assistantParts.join('\n\n')
       if (fullText) {
         stores.messages.insert({ projectPath, role: 'assistant', text: fullText })

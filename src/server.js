@@ -7,9 +7,9 @@ import { listProjects, listSessions, summarizeSession } from './lib/sessions.js'
 import { listRealProjects } from './lib/projects.js'
 import { listAgents } from './lib/agents.js'
 import { listConnectors, listPlugins } from './lib/connectors.js'
-import { usageReport } from './lib/usage.js'
+import { usageReport, listRecentModels } from './lib/usage.js'
 import { openStores } from './lib/store.js'
-import { launchRun, stopRun, approveRun, denyRun, readRunLog, runningCount } from './lib/runner.js'
+import { launchRun, stopRun, approveRun, denyRun, readRunLog, runningCount, EFFORT_LEVELS } from './lib/runner.js'
 import { startScheduler, nextRunTime, describeSchedule } from './lib/scheduler.js'
 import { sendChatMessage, chatBusy, chatHistory } from './lib/chat.js'
 import { gitStatus } from './lib/git.js'
@@ -170,6 +170,9 @@ async function handleApi(req, res, url, ctx) {
       const windowDays = Number(url.searchParams.get('days')) || 30
       return json(res, 200, await usageReport(claudeDir, { windowDays }))
     }
+    if (route === '/api/models' && method === 'GET') {
+      return json(res, 200, { models: await listRecentModels(claudeDir), efforts: EFFORT_LEVELS })
+    }
 
     // ---------- routines ----------
     if (route === '/api/routines' && method === 'GET') {
@@ -186,6 +189,7 @@ async function handleApi(req, res, url, ctx) {
         schedule: body.schedule,
         permissionMode: body.permissionMode || 'acceptEdits',
         model: body.model || null,
+        effort: body.effort || null,
         enabled: body.enabled !== false,
         nextRun: nextRunTime(body.schedule),
         lastRun: null,
@@ -203,6 +207,7 @@ async function handleApi(req, res, url, ctx) {
           prompt: routine.prompt,
           permissionMode: routine.permissionMode,
           model: routine.model,
+          effort: routine.effort,
           routineId: routine.id,
           routineName: routine.name,
         })
@@ -541,7 +546,14 @@ async function handleApi(req, res, url, ctx) {
     if (route === '/api/chat/history' && method === 'GET') {
       const project = url.searchParams.get('project')
       if (!project) return json(res, 400, { error: 'Missing ?project= parameter' })
-      return json(res, 200, { messages: chatHistory(stores, project), busy: chatBusy(project) })
+      const manager = stores.managers.list().find((m) => m.projectPath === project) || null
+      return json(res, 200, {
+        messages: chatHistory(stores, project),
+        busy: chatBusy(project),
+        model: manager?.model ?? null,
+        effort: manager?.effort ?? null,
+        permissionMode: manager?.permissionMode ?? 'acceptEdits',
+      })
     }
     if (route === '/api/chat' && method === 'POST') {
       const body = await readBody(req)
@@ -553,7 +565,14 @@ async function handleApi(req, res, url, ctx) {
       try {
         await sendChatMessage(
           stores,
-          { projectPath: body.projectPath, message: body.message, port: ctx.port },
+          {
+            projectPath: body.projectPath,
+            message: body.message,
+            port: ctx.port,
+            model: body.model,
+            permissionMode: body.permissionMode,
+            effort: body.effort,
+          },
           (event) => res.write(JSON.stringify(event) + '\n')
         )
       } catch (err) {

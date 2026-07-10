@@ -607,8 +607,8 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   padding: 2px;
 }
 .ch-box textarea:focus { outline: none; }
-.ch-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
-.ch-row select {
+.ch-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+.pill-select {
   background: var(--bg-subtle);
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -619,6 +619,35 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   padding: 3px 10px;
   max-width: 220px;
 }
+
+/* Chat settings: a small gear button anchoring a model/effort/permissions popover. */
+.chat-settings-anchor { position: relative; display: inline-flex; }
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  padding: 7px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.icon-btn:hover { background: var(--bg-subtle); color: var(--text); }
+.chat-settings {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 0;
+  width: 250px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 14px 4px;
+  box-shadow: 0 8px 24px rgba(31, 35, 40, 0.12);
+  z-index: 40;
+}
+.chat-settings.drop-down { bottom: auto; top: calc(100% + 10px); }
 .ch-recent { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 26px; }
 .ch-chip {
   display: inline-flex;

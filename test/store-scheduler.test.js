@@ -74,6 +74,7 @@ test('fireDueRoutines launches due routines and reschedules them', () => {
     prompt: 'do work',
     schedule: { type: 'interval', minutes: 60 },
     permissionMode: 'plan',
+    effort: 'xhigh',
     enabled: true,
     nextRun: now - 1000,
   })
@@ -104,6 +105,7 @@ test('fireDueRoutines launches due routines and reschedules them', () => {
   assert.equal(fired.length, 1)
   assert.equal(launched[0].routineName, 'due')
   assert.equal(launched[0].permissionMode, 'plan')
+  assert.equal(launched[0].effort, 'xhigh')
   const rescheduled = stores.routines.list().find((r) => r.name === 'due')
   assert.ok(rescheduled.nextRun > now)
   rmSync(stores.home, { recursive: true, force: true })

@@ -72,3 +72,37 @@ export async function usageReport(claudeDir, { windowDays = DEFAULT_WINDOW_DAYS 
     graphifyCandidates,
   }
 }
+
+const MODEL_SCAN_WINDOW_DAYS = 90
+
+/** "claude-opus-4-8" / "claude-haiku-4-5-20251001" → "Opus 4.8" / "Haiku 4.5" */
+export function modelDisplayName(id) {
+  const parts = String(id).replace(/^claude-/, '').replace(/-\d{8}$/, '').split('-')
+  const words = []
+  let digits = []
+  for (const part of parts) {
+    if (/^\d+$/.test(part)) {
+      digits.push(part)
+      continue
+    }
+    if (digits.length) {
+      words.push(digits.join('.'))
+      digits = []
+    }
+    words.push(part.charAt(0).toUpperCase() + part.slice(1))
+  }
+  if (digits.length) words.push(digits.join('.'))
+  return words.join(' ')
+}
+
+/**
+ * Models actually used in recent sessions on this machine, most-used first.
+ * Feeds the dashboard's model pickers — real ids, not a hardcoded alias list.
+ */
+export async function listRecentModels(claudeDir) {
+  const report = await usageReport(claudeDir, { windowDays: MODEL_SCAN_WINDOW_DAYS })
+  return Object.entries(report.byModel)
+    .filter(([id]) => id.startsWith('claude-'))
+    .sort((a, b) => b[1] - a[1])
+    .map(([id]) => ({ id, label: modelDisplayName(id) }))
+}

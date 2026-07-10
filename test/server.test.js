@@ -71,6 +71,7 @@ test('routine CRUD lifecycle over the API', async (t) => {
       projectPath: '/tmp',
       prompt: 'continue development',
       schedule: { type: 'daily', time: '09:00' },
+      effort: 'medium',
     }),
   })
   assert.equal(created.status, 201)
@@ -79,6 +80,7 @@ test('routine CRUD lifecycle over the API', async (t) => {
   assert.ok(routine.nextRun > Date.now())
   assert.equal(routine.scheduleLabel, 'daily at 09:00')
   assert.equal(routine.permissionMode, 'acceptEdits')
+  assert.equal(routine.effort, 'medium')
 
   const paused = await fetch(`${base}/api/routines/${routine.id}`, {
     method: 'PUT',
@@ -147,13 +149,34 @@ test('goal CRUD lifecycle over the API', async (t) => {
   assert.equal((await (await fetch(`${base}/api/goals`)).json()).length, 0)
 })
 
-test('chat history endpoint returns empty history for fresh project', async (t) => {
+test('chat history endpoint returns empty history and default prefs for fresh project', async (t) => {
   const base = await withServer(t)
   const res = await fetch(`${base}/api/chat/history?project=%2Ftmp`)
   assert.equal(res.status, 200)
   const data = await res.json()
   assert.deepEqual(data.messages, [])
   assert.equal(data.busy, false)
+  assert.equal(data.model, null)
+  assert.equal(data.effort, null)
+  assert.equal(data.permissionMode, 'acceptEdits')
+})
+
+test('chat history endpoint returns the last-used model, effort, and permission mode', async (t) => {
+  const { base, stores } = await withServerAndStores(t)
+  stores.managers.insert({ projectPath: '/tmp', sessionId: 'sess-1', model: 'opus', permissionMode: 'plan', effort: 'xhigh' })
+  const data = await (await fetch(`${base}/api/chat/history?project=%2Ftmp`)).json()
+  assert.equal(data.model, 'opus')
+  assert.equal(data.effort, 'xhigh')
+  assert.equal(data.permissionMode, 'plan')
+})
+
+test('models endpoint lists models seen in real sessions plus CLI effort levels', async (t) => {
+  const base = await withServer(t)
+  const data = await (await fetch(`${base}/api/models`)).json()
+  const sonnet = data.models.find((m) => m.id === 'claude-sonnet-5')
+  assert.ok(sonnet, 'model used in fixture transcripts is discovered')
+  assert.equal(sonnet.label, 'Sonnet 5')
+  assert.deepEqual(data.efforts, ['low', 'medium', 'high', 'xhigh', 'max'])
 })
 
 test('digest tracks updates since last ack', async (t) => {

@@ -62,6 +62,7 @@ export function fireDueRoutines(stores, now = Date.now(), launch = launchRun) {
         prompt: routine.prompt,
         permissionMode: routine.permissionMode,
         model: routine.model,
+        effort: routine.effort,
         routineId: routine.id,
         routineName: routine.name,
       })
