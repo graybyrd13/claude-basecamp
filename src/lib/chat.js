@@ -132,12 +132,20 @@ export function sendChatMessage(stores, { projectPath, message, port, model, per
   // Headless mode denies Bash without an explicit grant in every permission
   // mode short of bypass, which would cut the manager off from the Basecamp
   // API cookbook — so curl is always allowlisted.
+  //
+  // The manager only ever talks to Basecamp's own API via curl, never any
+  // MCP tool — but it inherits every MCP server configured in the user's
+  // global ~/.claude.json, each adding tool schemas and connection latency
+  // to every turn. --strict-mcp-config plus an empty inline config loads
+  // zero MCP servers for this session without touching that global file.
   const args = [
     '-p', message,
     '--output-format', 'stream-json',
     '--verbose',
     '--permission-mode', chatPermissionMode,
     '--allowedTools', 'Bash(curl:*)',
+    '--strict-mcp-config',
+    '--mcp-config', '{"mcpServers":{}}',
   ]
   if (chatModel) args.push('--model', chatModel)
   if (chatEffort) args.push('--effort', chatEffort)
