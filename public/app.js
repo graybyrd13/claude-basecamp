@@ -2,7 +2,8 @@
 
 const state = {
   page: 'chat',
-  hqRepo: null,
+  chatTarget: 'global',
+  repoFocus: null,
   statsTab: 'activity',
   runId: null,
   chatBusy: false,
@@ -574,65 +575,75 @@ function gitChips(git) {
 
 /* ---------- Chat landing (default page) ---------- */
 
-async function renderChatHome() {
-  const [allRepos, modelData] = await Promise.all([api('/api/projects'), getModelData()])
-  const repos = allRepos.filter((r) => r.exists)
-  if (!state.chatRepo || !repos.find((r) => r.path === state.chatRepo)) {
-    state.chatRepo = repos[0]?.path || null
-  }
+async function renderChat() {
+  state.chatTarget = 'global'
+  const modelData = await getModelData()
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
 
   main.innerHTML = `
-    <div class="chat-home">
-      <div class="ch-greet">${greeting}</div>
-      <div class="ch-sub">Talk to a repository's manager. Mention any repo by name and the message routes itself.</div>
-      <div class="ch-box">
-        <textarea id="ch-input" rows="3" placeholder="What are we working on?"></textarea>
-        <div class="ch-row">
-          <select id="ch-repo" class="pill-select">${repos.map((r) => `<option value="${esc(r.path)}" ${r.path === state.chatRepo ? 'selected' : ''}>${esc(repoName(r.path))}</option>`).join('')}</select>
-          ${chatSettingsPanel(modelData, 'drop-down')}
-          <span style="flex:1"></span>
-          <button class="btn primary" id="ch-send">Send</button>
-        </div>
+    <div class="hq">
+      <div class="hq-head">
+        <span style="color:var(--muted)">${icon('chat', 16)}</span>
+        <h1>${greeting}</h1>
+        <span class="muted" style="font-size:12.5px">your manager — one persistent agent across every repo on this machine</span>
+        <span style="flex:1"></span>
+        <button class="btn small" id="chat-compact" title="Collapse the conversation into a handoff brief; the next message starts a fresh session seeded with it">Compact</button>
+        <button class="btn small danger" id="chat-clear" title="Hide the history and start a fresh session">Clear</button>
       </div>
-      <div class="ch-recent">
-        ${repos.slice(0, 6).map((r) => `
-          <button class="ch-chip" data-hq="${esc(r.path)}">
-            ${icon('chat', 13)} ${esc(repoName(r.path))}
-            ${r.isActive ? '<span class="dot green pulse"></span>' : ''}
-          </button>`).join('')}
+      <div class="hq-body">
+        <div class="chat-col">
+          <div class="chat-scroll" id="chat-scroll">
+            <div class="chat-thread" id="chat-thread"><div class="empty">Loading…</div></div>
+          </div>
+          <div class="composer">
+            <div class="composer-inner">
+              ${chatSettingsPanel(modelData)}
+              <textarea id="chat-input" rows="1" placeholder="What are we working on?"></textarea>
+              <button class="btn primary" id="chat-send">Send</button>
+            </div>
+            <div class="hint">Full Claude Code tools across every repo and folder on this machine. It can schedule routines, track goals, launch runs, and create checks in any repo. Durable notes: ~/.claude-basecamp/MANAGER.md.</div>
+          </div>
+        </div>
       </div>
     </div>`
 
-  const input = $('#ch-input')
-  const send = () => {
-    const message = input.value.trim()
-    if (!message) return
-    const lower = message.toLowerCase()
-    const mentioned = repos.find((r) => {
-      const name = repoName(r.path).toLowerCase()
-      return name.length >= 3 && lower.includes(name)
-    })
-    state.pendingChatMessage = message
-    state.pendingChatPrefs = {
-      model: $('#chat-model').value || null,
-      effort: $('#chat-effort').value || null,
-      permissionMode: $('#chat-permission').value,
-    }
-    openHQ(mentioned?.path || $('#ch-repo').value)
-  }
+  const input = $('#chat-input')
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      send()
+      sendChat()
     }
   })
-  $('#ch-send').addEventListener('click', send)
-  $('#ch-repo').addEventListener('change', (e) => { state.chatRepo = e.target.value })
-  main.querySelectorAll('[data-hq]').forEach((el) =>
-    el.addEventListener('click', () => openHQ(el.dataset.hq))
-  )
+  input.addEventListener('input', () => {
+    input.style.height = 'auto'
+    input.style.height = Math.min(input.scrollHeight, 160) + 'px'
+  })
+  $('#chat-send').addEventListener('click', sendChat)
+  $('#chat-compact').addEventListener('click', async () => {
+    if (state.chatBusy) return alert('Wait for the manager to finish its current turn.')
+    if (!confirm('Compact the conversation? It collapses into a handoff brief the next session starts from.')) return
+    const btn = $('#chat-compact')
+    btn.disabled = true
+    btn.textContent = 'Compacting…'
+    try {
+      await api('/api/chat/compact', { method: 'POST', body: { project: state.chatTarget } })
+      await loadChatHistory()
+    } catch (err) {
+      alert(err.message)
+    }
+    if ($('#chat-compact')) {
+      $('#chat-compact').disabled = false
+      $('#chat-compact').textContent = 'Compact'
+    }
+  })
+  $('#chat-clear').addEventListener('click', async () => {
+    if (state.chatBusy) return alert('Wait for the manager to finish its current turn.')
+    if (!confirm('Clear the conversation? History hides and the next message starts a fresh session.')) return
+    await api('/api/chat/clear', { method: 'POST', body: { project: state.chatTarget } })
+    await loadChatHistory()
+  })
+  await loadChatHistory()
   input.focus()
 }
 
@@ -876,107 +887,215 @@ async function renderHome(force = false) {
 /* ---------- Repos ---------- */
 
 async function renderRepos() {
-  main.innerHTML = '<div class="page"><h1>Repositories</h1><p class="subtitle">Loading git status…</p></div>'
-  const repos = (await api('/api/projects?git=1')).filter((r) => r.exists)
+  if (!renderRepos._loaded) {
+    main.innerHTML = '<div class="page"><h1>Repos</h1><p class="subtitle">Loading…</p></div>'
+  }
+  const [repos, intents, budget, runs] = await Promise.all([
+    api('/api/projects?git=1'),
+    api('/api/intents').catch(() => []),
+    api('/api/budget').catch(() => null),
+    api('/api/runs').catch(() => []),
+  ])
+  renderRepos._loaded = true
+
   main.innerHTML = `
     <div class="page">
       <div class="page-head">
-        <div><h1>Repositories</h1><p class="subtitle">Open a repository to talk to its manager.</p></div>
+        <div><h1>Repos</h1><p class="subtitle">Every repository, its state, and the agents working in it. Click a repo to open its agents; talk to the manager in Chat.</p></div>
+        <button class="btn primary" id="new-task">${icon('play', 14)}Run a task</button>
       </div>
-      <div class="box">
-        ${repos.map((r) => `
-          <div class="row clickable" data-hq="${esc(r.path)}">
-            <span style="color:var(--muted)">${icon('repo', 16)}</span>
-            <div class="grow">
-              <div class="title">
-                ${esc(repoName(r.path))}
-                ${r.isActive ? '<span class="chip green"><span class="dot green pulse"></span>active</span>' : ''}
-                ${gitChips(r.git)}
-              </div>
-              <div class="sub">
-                ${r.git?.commit ? `${esc(r.git.commit.subject.slice(0, 80))} · ${fmtTime(r.git.commit.time)}` : `<span class="mono">${esc(r.path)}</span>`}
-              </div>
-            </div>
-            <span class="muted" style="font-size:12px">${fmtTime(r.lastModified)}</span>
-          </div>`).join('')}
-        ${repos.length === 0 ? '<div class="empty">No repositories found. Run Claude Code in a project first.</div>' : ''}
-      </div>
+      ${repos.map((r) => repoCard(r, { intents, budget, runs, expanded: r.path === state.repoFocus })).join('')}
+      ${repos.length === 0 ? '<div class="box"><div class="empty">No repositories found. Run Claude Code in a project first.</div></div>' : ''}
     </div>`
-  main.querySelectorAll('[data-hq]').forEach((el) =>
-    el.addEventListener('click', () => openHQ(el.dataset.hq))
+
+  $('#new-task')?.addEventListener('click', () => openTaskModal())
+  main.querySelectorAll('[data-repo-toggle]').forEach((el) =>
+    el.addEventListener('click', () => {
+      state.repoFocus = state.repoFocus === el.dataset.repoToggle ? null : el.dataset.repoToggle
+      renderRepos()
+    })
+  )
+  main.querySelectorAll('[data-monitor-run]').forEach((el) =>
+    el.addEventListener('click', (e) => {
+      e.stopPropagation()
+      openRunMonitor(el.dataset.monitorRun)
+    })
+  )
+  main.querySelectorAll('[data-run-task]').forEach((el) =>
+    el.addEventListener('click', (e) => {
+      e.stopPropagation()
+      openTaskModal(el.dataset.runTask)
+    })
+  )
+  main.querySelectorAll('[data-new-check]').forEach((el) =>
+    el.addEventListener('click', (e) => {
+      e.stopPropagation()
+      openIntentModal(el.dataset.newCheck)
+    })
+  )
+  if (state.repoFocus) loadRepoDetail(state.repoFocus)
+}
+
+const cssId = (path) => path.replace(/[^a-zA-Z0-9]/g, '-')
+
+function repoCard(r, { intents, budget, runs, expanded }) {
+  const checks = intents.filter((i) => i.projectPath === r.path)
+  const holding = checks.filter((i) => i.enabled && i.lastStatus === 'holding').length
+  const attention = checks.filter((i) =>
+    ['drifting', 'decision-needed', 'budget-paused', 'fix-ready'].includes(i.lastStatus)
+  ).length
+  const spend = Number(budget?.spend.byRepo[r.path]) || 0
+  const repoRuns = runs.filter((x) => x.projectPath === r.path)
+  const live = repoRuns.filter((x) => x.status === 'running' || x.status === 'awaiting-approval')
+  const settled = repoRuns.filter((x) => x.status !== 'running' && x.status !== 'awaiting-approval')
+
+  return `
+    <div class="box" style="margin-bottom:10px">
+      <div class="row clickable" data-repo-toggle="${esc(r.path)}">
+        <span style="color:var(--muted)">${icon('repo', 16)}</span>
+        <div class="grow">
+          <div class="title">${esc(repoName(r.path))}
+            ${r.isActive ? '<span class="chip green"><span class="dot green pulse"></span>active</span>' : ''}
+            ${gitChips(r.git)}
+            ${live.length ? `<span class="chip green"><span class="dot green pulse"></span>${live.length} agent${live.length === 1 ? '' : 's'} live</span>` : ''}
+            ${attention ? `<span class="chip" style="color:var(--attention);border-color:var(--attention)">${attention} need${attention === 1 ? 's' : ''} attention</span>` : ''}
+          </div>
+          <div class="sub">${r.sessionCount} session${r.sessionCount === 1 ? '' : 's'}${checks.length ? ` · ${checks.length} check${checks.length === 1 ? '' : 's'} (${holding} passing)` : ''}${spend ? ` · $${spend.toFixed(2)} this month` : ''} · ${fmtTime(r.lastModified)}</div>
+        </div>
+        <span class="muted" style="font-size:15px">${expanded ? '−' : '+'}</span>
+      </div>
+      ${expanded ? repoAgents(r, { checks, live, settled }) : ''}
+    </div>`
+}
+
+function repoAgents(r, { checks, live, settled }) {
+  const runRow = (x, isLive) => `
+    <div class="rail-item clickable" data-monitor-run="${x.id}" title="Monitor this agent">
+      <div class="t"><span>${esc((x.routineName || x.prompt || '').slice(0, 46))}</span>${statusChip(x.status)}${x.cleanRoom ? cleanRoomChip(x.cleanRoom) : ''}</div>
+      <div class="s">${isLive ? `${fmtDuration(x.startedAt)} elapsed` : fmtTime(x.startedAt)}${(x.commits || []).length ? ` · ${x.commits.length} commit${x.commits.length === 1 ? '' : 's'}` : ''}${x.costUsd ? ` · $${x.costUsd.toFixed(2)}` : ''}</div>
+    </div>`
+  return `
+    <div style="padding:2px 14px 12px">
+      <h2 style="margin-top:8px">Agents</h2>
+      ${live.map((x) => runRow(x, true)).join('')}
+      ${settled.slice(0, 6).map((x) => runRow(x, false)).join('')}
+      ${live.length + settled.length === 0 ? '<div class="faint" style="font-size:12px">No agents have run here yet.</div>' : ''}
+      <div style="display:flex;gap:8px;margin:10px 0 2px">
+        <button class="btn small" data-run-task="${esc(r.path)}">${icon('play', 12)}Run a task</button>
+        <button class="btn small" data-new-check="${esc(r.path)}">${icon('pulse', 12)}New check</button>
+      </div>
+      ${checks.length ? `
+        <h2>Checks</h2>
+        ${checks.map((i) => `
+          <div class="rail-item">
+            <div class="t"><span>${esc(i.label)}</span>${intentStatusChip(i.enabled ? i.lastStatus : 'paused')}</div>
+            <div class="s">${i.lastDetail ? esc(i.lastDetail.split('\n')[0].slice(0, 90)) : 'not checked yet'}</div>
+          </div>`).join('')}` : ''}
+      <div id="repo-detail-${cssId(r.path)}"></div>
+    </div>`
+}
+
+/** Goals and recent sessions load after the card opens — they need extra requests. */
+async function loadRepoDetail(path) {
+  const el = $(`#repo-detail-${cssId(path)}`)
+  if (!el) return
+  const [goals, sessions] = await Promise.all([
+    api(`/api/goals?project=${encodeURIComponent(path)}`).catch(() => []),
+    api(`/api/repo/sessions?path=${encodeURIComponent(path)}`).catch(() => []),
+  ])
+  if (!$(`#repo-detail-${cssId(path)}`)) return
+  el.innerHTML = `
+    ${goals.length ? `
+      <h2>Goals</h2>
+      ${goals.map((g) => `
+        <div class="rail-item ${g.status === 'done' ? 'goal-done' : ''}">
+          <div class="t">
+            <span class="goal-toggle" data-goal="${g.id}" data-status="${g.status}">
+              ${icon(g.status === 'done' ? 'checkboxOn' : 'checkbox', 14)}
+              <span>${esc(g.title)}</span>
+            </span>
+          </div>
+        </div>`).join('')}` : ''}
+    ${sessions.length ? `
+      <h2>Recent sessions</h2>
+      ${sessions.slice(0, 5).map((s) => `
+        <div class="rail-item clickable" data-open-session="${esc(s.projectId)}::${esc(s.id)}" data-session-time="${s.lastModified}">
+          <div class="t"><span class="mono ${s.isActive ? '' : 'muted'}">${esc(s.id.slice(0, 8))}</span>${s.isActive ? '<span class="chip green"><span class="dot green pulse"></span>active</span>' : ''}</div>
+          <div class="s">${fmtTime(s.lastModified)} · ${(s.bytes / 1024).toFixed(0)} KB</div>
+        </div>`).join('')}` : ''}`
+  el.querySelectorAll('[data-goal]').forEach((g) =>
+    g.addEventListener('click', async () => {
+      await api(`/api/goals/${g.dataset.goal}`, {
+        method: 'PUT',
+        body: { status: g.dataset.status === 'done' ? 'open' : 'done' },
+      })
+      loadRepoDetail(path)
+    })
+  )
+  el.querySelectorAll('[data-open-session]').forEach((s) =>
+    s.addEventListener('click', () => {
+      const [projectId, sessionId] = s.dataset.openSession.split('::')
+      openSessionCard({ projectId, sessionId, path, lastModified: Number(s.dataset.sessionTime), title: null, snippet: null })
+    })
   )
 }
 
-/* ---------- HQ (manager chat) ---------- */
-
-async function renderHQ() {
-  const path = state.hqRepo
-  const modelData = await getModelData()
-  main.innerHTML = `
-    <div class="hq">
-      <div class="hq-head">
-        <span style="color:var(--muted)">${icon('repo', 16)}</span>
-        <h1>${esc(repoName(path))}</h1>
-        <span class="git-line" id="hq-git"></span>
-        <span style="flex:1"></span>
-        <button class="btn small" id="hq-run-task">${icon('play', 13)}Background task</button>
-      </div>
-      <div class="hq-body">
-        <div class="chat-col">
-          <div class="chat-scroll" id="chat-scroll">
-            <div class="chat-thread" id="chat-thread"><div class="empty">Loading…</div></div>
-          </div>
-          <div class="composer">
-            <div class="composer-inner">
-              ${chatSettingsPanel(modelData)}
-              <textarea id="chat-input" rows="1" placeholder="Message the manager…"></textarea>
-              <button class="btn primary" id="chat-send">Send</button>
-            </div>
-            <div class="hint">Full Claude Code tools in this repo. It can schedule routines, track goals, launch runs, and configure hooks. It keeps durable notes in BASECAMP.md.</div>
-          </div>
-        </div>
-        <div class="hq-rail" id="hq-rail"></div>
-      </div>
-    </div>`
-
-  $('#hq-run-task').addEventListener('click', () => openTaskModal(path))
-  const input = $('#chat-input')
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      sendChat()
+/** Live view of one agent: status, log tail, and the actions its state allows. */
+async function openRunMonitor(runId) {
+  let timer = null
+  openModal(`
+    <h2 style="display:flex;align-items:center;gap:8px">Agent <span id="mon-status"></span></h2>
+    <div class="sub mono" id="mon-meta" style="margin-bottom:8px"></div>
+    <div class="log-view" id="mon-log" style="max-height:50vh;min-height:160px">Loading…</div>
+    <div class="modal-actions">
+      <button type="button" class="btn" data-close>Close</button>
+      <span style="flex:1"></span>
+      <span id="mon-actions" style="display:flex;gap:8px"></span>
+    </div>`)
+  const refresh = async () => {
+    if (!$('#mon-log')) {
+      clearInterval(timer)
+      return
     }
-  })
-  input.addEventListener('input', () => {
-    input.style.height = 'auto'
-    input.style.height = Math.min(input.scrollHeight, 160) + 'px'
-  })
-  $('#chat-send').addEventListener('click', sendChat)
-
-  api('/api/projects?git=1').then((repos) => {
-    const repo = repos.find((r) => r.path === path)
-    const el = $('#hq-git')
-    if (el && repo?.git) el.innerHTML = gitChips(repo.git)
-  })
-
-  await Promise.all([loadChatHistory(), renderHQRail()])
-  // A choice made on the chat landing page wins over the repo's last-used prefs.
-  if (state.pendingChatPrefs) {
-    applyChatPrefs(state.pendingChatPrefs.model, state.pendingChatPrefs.effort, state.pendingChatPrefs.permissionMode)
-    state.pendingChatPrefs = null
+    try {
+      const [run, log] = await Promise.all([api(`/api/runs/${runId}`), api(`/api/runs/${runId}/log`)])
+      $('#mon-status').innerHTML = statusChip(run.status) + (run.cleanRoom ? cleanRoomChip(run.cleanRoom) : '')
+      $('#mon-meta').textContent = `${repoName(run.projectPath)} · ${(run.routineName || run.prompt || '').slice(0, 90)}${run.costUsd ? ` · $${run.costUsd.toFixed(2)}` : ''}`
+      const logEl = $('#mon-log')
+      const stick = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 24
+      logEl.textContent = log.log || '(no output yet)'
+      if (stick) logEl.scrollTop = logEl.scrollHeight
+      $('#mon-actions').innerHTML = `
+        ${run.status === 'running' ? '<button class="btn small danger" id="mon-stop">Stop</button>' : ''}
+        ${run.status === 'awaiting-approval' ? '<button class="btn small primary" id="mon-approve">Approve</button><button class="btn small danger" id="mon-deny">Deny</button>' : ''}
+        ${run.status === 'succeeded' && run.cleanRoom?.state === 'open' ? `<button class="btn small" data-diff-run="${run.id}">View diff</button><button class="btn small primary" data-apply-run="${run.id}">Apply</button><button class="btn small danger" data-discard-run="${run.id}">Discard</button>` : ''}`
+      $('#mon-stop')?.addEventListener('click', async () => {
+        await api(`/api/runs/${runId}/stop`, { method: 'POST' })
+        refresh()
+      })
+      $('#mon-approve')?.addEventListener('click', async () => {
+        await api(`/api/runs/${runId}/approve`, { method: 'POST' })
+        refresh()
+      })
+      $('#mon-deny')?.addEventListener('click', async () => {
+        await api(`/api/runs/${runId}/deny`, { method: 'POST' })
+        refresh()
+      })
+      wireCleanRoomButtons($('#mon-actions'), refresh)
+    } catch {
+      /* run vanished mid-poll */
+    }
   }
-  if (state.pendingChatMessage) {
-    input.value = state.pendingChatMessage
-    state.pendingChatMessage = null
-    sendChat()
-  } else {
-    input.focus()
-  }
+  await refresh()
+  timer = setInterval(refresh, 2000)
 }
 
+/* ---------- chat machinery (shared by the global manager page) ---------- */
+
 function chatBubble(role, html) {
-  return `<div class="msg ${role}">
-    <div class="who">${role === 'user' ? 'you' : 'manager'}</div>
+  const who = role === 'user' ? 'you' : role === 'summary' ? 'compacted — handoff brief' : 'manager'
+  return `<div class="msg ${role === 'summary' ? 'assistant' : role}">
+    <div class="who">${who}</div>
     <div class="bubble">${html}</div>
   </div>`
 }
@@ -984,16 +1103,16 @@ function chatBubble(role, html) {
 async function loadChatHistory() {
   const thread = $('#chat-thread')
   try {
-    const { messages, busy, model, effort, permissionMode } = await api(`/api/chat/history?project=${encodeURIComponent(state.hqRepo)}`)
+    const { messages, busy, model, effort, permissionMode } = await api(`/api/chat/history?project=${encodeURIComponent(state.chatTarget)}`)
     state.chatBusy = busy
     applyChatPrefs(model, effort, permissionMode)
     if (!messages.length) {
       thread.innerHTML = `
         <div class="empty">
-          This repository's manager. It remembers everything across sessions.<br/><br/>
-          <span class="muted">"Set up a routine to run the tests every morning and fix failures."<br/>
-          "Our goal is to ship v1 by end of month — track it."<br/>
-          "What changed in this repo this week?"</span>
+          Your manager. One persistent agent with full access to every repo and folder on this machine.<br/><br/>
+          <span class="muted">"What needs my attention across all repos?"<br/>
+          "Set up nightly tests for basecamp and keep its deps fresh."<br/>
+          "Our goal is to ship v1 of the Roblox game by end of month — track it."</span>
         </div>`
       return
     }
@@ -1046,7 +1165,7 @@ async function sendChat() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        projectPath: state.hqRepo,
+        projectPath: state.chatTarget,
         message,
         model: $('#chat-model')?.value || null,
         effort: $('#chat-effort')?.value || null,
@@ -1074,8 +1193,7 @@ async function sendChat() {
   }
   $('#thinking')?.remove()
   state.chatBusy = false
-  $('#chat-send').disabled = false
-  renderHQRail()
+  if ($('#chat-send')) $('#chat-send').disabled = false
 }
 
 function handleChatEvent(event) {
@@ -1098,123 +1216,6 @@ function handleChatEvent(event) {
     thread.insertAdjacentHTML('beforeend', chatBubble('assistant', md(`Error: ${event.error}`)))
   }
   scrollChat()
-}
-
-async function renderHQRail() {
-  const rail = $('#hq-rail')
-  if (!rail) return
-  const path = state.hqRepo
-  const [sessions, goals, routines, runs] = await Promise.all([
-    api(`/api/repo/sessions?path=${encodeURIComponent(path)}`),
-    api(`/api/goals?project=${encodeURIComponent(path)}`),
-    api('/api/routines'),
-    api('/api/runs'),
-  ])
-  const repoRoutines = routines.filter((r) => r.projectPath === path)
-  const repoRuns = runs.filter((r) => r.projectPath === path).slice(0, 5)
-  const snapshot = JSON.stringify([sessions, goals, routines, runs.slice(0, 30)])
-  if (snapshot === renderHQRail._snapshot && $('#hq-rail')?.childElementCount) return
-  renderHQRail._snapshot = snapshot
-
-  const open = goals.filter((g) => g.status === 'open')
-  const done = goals.filter((g) => g.status === 'done').slice(0, 3)
-  const active = sessions.filter((s) => s.isActive)
-  const recent = sessions.filter((s) => !s.isActive).slice(0, 3)
-
-  rail.innerHTML = `
-    <h2>Sessions</h2>
-    ${active.map((s) => `
-      <div class="rail-item">
-        <div class="t"><span class="mono">${esc(s.id.slice(0, 8))}</span><span class="chip green"><span class="dot green pulse"></span>active</span></div>
-        <div class="s">${(s.bytes / 1024).toFixed(0)} KB · ${fmtTime(s.lastModified)}</div>
-      </div>`).join('')}
-    ${recent.map((s) => `
-      <div class="rail-item">
-        <div class="t"><span class="mono muted">${esc(s.id.slice(0, 8))}</span></div>
-        <div class="s">${fmtTime(s.lastModified)}</div>
-      </div>`).join('')}
-    ${sessions.length === 0 ? '<div class="faint" style="font-size:12px">No sessions in this repo yet.</div>' : ''}
-
-    <h2>Goals</h2>
-    ${open.concat(done).map((g) => `
-      <div class="rail-item ${g.status === 'done' ? 'goal-done' : ''}">
-        <div class="t">
-          <span class="goal-toggle" data-goal="${g.id}" data-status="${g.status}">
-            ${icon(g.status === 'done' ? 'checkboxOn' : 'checkbox', 14)}
-            <span>${esc(g.title)}</span>
-          </span>
-        </div>
-        ${g.notes ? `<div class="s">${esc(g.notes)}</div>` : ''}
-      </div>`).join('') || '<div class="faint" style="font-size:12px">None yet — tell the manager what you are driving toward.</div>'}
-
-    <h2>Routines</h2>
-    ${repoRoutines.map((r) => `
-      <div class="rail-item">
-        <div class="t"><span>${esc(r.name)}</span>${r.enabled ? `<span class="chip">${esc(fmtUntil(r.nextRun))}</span>` : '<span class="chip">paused</span>'}</div>
-        <div class="s">${esc(r.scheduleLabel)}</div>
-      </div>`).join('') || '<div class="faint" style="font-size:12px">None yet — ask the manager to schedule one.</div>'}
-
-    <h2>Recent runs</h2>
-    ${repoRuns.map((r) => `
-      <div class="rail-item">
-        <div class="t"><span>${esc((r.routineName || r.prompt).slice(0, 30))}</span>${statusChip(r.status)}</div>
-        <div class="s">${fmtTime(r.startedAt)}${(r.commits || []).length ? ` · ${r.commits.length} commit${r.commits.length === 1 ? '' : 's'}` : ''}${r.costUsd ? ` · $${r.costUsd.toFixed(2)}` : ''}</div>
-      </div>`).join('') || '<div class="faint" style="font-size:12px">No background runs yet.</div>'}
-
-    <h2>GitHub</h2>
-    <div id="hq-github"><div class="faint" style="font-size:12px">Checking…</div></div>
-  `
-  renderHQGithub()
-  rail.querySelectorAll('[data-goal]').forEach((el) =>
-    el.addEventListener('click', async () => {
-      await api(`/api/goals/${el.dataset.goal}`, {
-        method: 'PUT',
-        body: { status: el.dataset.status === 'done' ? 'open' : 'done' },
-      })
-      renderHQRail()
-    })
-  )
-}
-
-async function renderHQGithub() {
-  const el = $('#hq-github')
-  if (!el) return
-  try {
-    const gh = await api(`/api/repo/github?path=${encodeURIComponent(state.hqRepo)}`)
-    const current = $('#hq-github')
-    if (!current) return
-    if (!gh.available) {
-      current.innerHTML = `<div class="faint" style="font-size:12px">${esc(gh.reason)}</div>`
-      return
-    }
-    current.innerHTML = `
-      ${gh.issues.map((i) => `
-        <div class="rail-item">
-          <div class="t"><span>#${i.number} ${esc(i.title.slice(0, 34))}</span>
-            <button class="btn small" data-issue="${i.number}" title="Launch a background run on this issue">Work on it</button>
-          </div>
-          <div class="s">issue · ${fmtTime(Date.parse(i.updatedAt))}</div>
-        </div>`).join('')}
-      ${gh.prs.map((p) => `
-        <div class="rail-item">
-          <div class="t"><span>#${p.number} ${esc(p.title.slice(0, 38))}</span>${p.isDraft ? '<span class="chip">draft</span>' : '<span class="chip green">open</span>'}</div>
-          <div class="s">pull request · ${fmtTime(Date.parse(p.updatedAt))}</div>
-        </div>`).join('')}
-      ${gh.issues.length === 0 && gh.prs.length === 0 ? '<div class="faint" style="font-size:12px">No open issues or pull requests.</div>' : ''}
-    `
-    current.querySelectorAll('[data-issue]').forEach((btn) =>
-      btn.addEventListener('click', async () => {
-        btn.disabled = true
-        btn.textContent = 'Launched'
-        await api('/api/repo/issue-run', {
-          method: 'POST',
-          body: { path: state.hqRepo, issue: Number(btn.dataset.issue) },
-        })
-      })
-    )
-  } catch (err) {
-    if ($('#hq-github')) $('#hq-github').innerHTML = `<div class="faint" style="font-size:12px">${esc(err.message)}</div>`
-  }
 }
 
 /* ---------- Routines ---------- */
@@ -2140,10 +2141,10 @@ async function openPalette() {
   palette.items = [
     ...repos.filter((r) => r.exists).map((r) => ({
       label: repoName(r.path),
-      hint: 'open manager',
+      hint: 'open repo',
       iconName: 'repo',
       keywords: r.path.toLowerCase(),
-      action: () => openHQ(r.path),
+      action: () => openRepo(r.path),
     })),
     { label: 'Run a task', hint: 'command', iconName: 'play', keywords: 'run task new', action: () => openTaskModal() },
     { label: 'New routine', hint: 'command', iconName: 'sync', keywords: 'routine schedule new', action: () => openRoutineModal() },
@@ -2213,7 +2214,7 @@ async function openSessionCard(result) {
     <div class="modal-actions">
       <button type="button" class="btn" data-close>Close</button>
       <button type="button" class="btn" id="copy-resume">Copy resume command</button>
-      <button type="button" class="btn primary" id="open-manager-from-session">Open manager</button>
+      <button type="button" class="btn primary" id="open-manager-from-session">Open repo</button>
     </div>`)
   $('#copy-resume')?.addEventListener('click', async () => {
     await navigator.clipboard.writeText(resume)
@@ -2221,7 +2222,7 @@ async function openSessionCard(result) {
   })
   $('#open-manager-from-session')?.addEventListener('click', () => {
     closeModal()
-    openHQ(result.path)
+    openRepo(result.path)
   })
 }
 
@@ -2289,7 +2290,7 @@ document.addEventListener('keydown', (e) => {
 /* ---------- navigation + polling ---------- */
 
 const pages = {
-  chat: renderChatHome,
+  chat: renderChat,
   home: renderHome,
   repos: renderRepos,
   intents: renderIntents,
@@ -2299,7 +2300,6 @@ const pages = {
   stats: renderStats,
   catalog: renderCatalog,
   settings: renderSettings,
-  hq: renderHQ,
 }
 
 const NAV = [
@@ -2332,9 +2332,9 @@ function go(page) {
   render()
 }
 
-function openHQ(path) {
-  state.hqRepo = path
-  go('hq')
+function openRepo(path) {
+  state.repoFocus = path
+  go('repos')
 }
 
 function render() {
@@ -2354,12 +2354,12 @@ async function refreshSidebarRepos() {
     $('#running-count').textContent = running
     sidebarRepos = repos.filter((r) => r.exists).slice(0, 8)
     $('#nav-repos').innerHTML = sidebarRepos.map((r) => `
-      <button data-hq="${esc(r.path)}" class="${state.page === 'hq' && state.hqRepo === r.path ? 'active' : ''}">
-        ${icon('chat', 14)}<span class="nav-label">${esc(repoName(r.path))}</span>
+      <button data-repo="${esc(r.path)}" class="${state.page === 'repos' && state.repoFocus === r.path ? 'active' : ''}">
+        ${icon('repo', 14)}<span class="nav-label">${esc(repoName(r.path))}</span>
         ${r.isActive ? '<span class="dot green pulse" style="margin-left:auto"></span>' : ''}
       </button>`).join('')
     $('#nav-repos').querySelectorAll('button').forEach((b) =>
-      b.addEventListener('click', () => openHQ(b.dataset.hq))
+      b.addEventListener('click', () => openRepo(b.dataset.repo))
     )
   } catch { /* server briefly unavailable */ }
 }
@@ -2372,5 +2372,4 @@ setInterval(() => {
   if (!$('#modal-backdrop').classList.contains('hidden') || palette.open) return
   if (userIsTyping()) return
   if (state.page === 'home') renderHome().catch(() => {})
-  if (state.page === 'hq' && !state.chatBusy) renderHQRail()
 }, 6000)

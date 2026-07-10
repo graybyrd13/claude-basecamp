@@ -25,7 +25,7 @@ catalog.json             The community catalog (fetched live from main by every 
 ## The engines
 
 - `lib/runner.js` — spawns headless `claude -p` runs (stream-json), links resulting git commits (`lib/git.js`), pauses on permission denials as **awaiting-approval** (`approveRun`/`denyRun` resume with a one-turn grant)
-- `lib/chat.js` — per-repo **manager** conversations: `claude -p --resume <session>` with a system-prompt cookbook for Basecamp's own API
+- `lib/chat.js` — the **manager**: one persistent machine-wide conversation (`claude -p --resume <session>` from the home directory, live repo map + API cookbook in the system prompt). Compact collapses history into a handoff brief that seeds the next session; clear starts fresh; both cut by message id, never deleting from disk
 - `lib/scheduler.js` — fires **routines** on interval/daily/weekly schedules
 - `lib/reconcile.js` + `lib/checks.js` — **Checks**: deterministic drift detection (real test suite, `npm outdated`, `gh`) or plain-English evaluation, convergence runs on failure, escalation to decision cards. Bounded: concurrency cap, daily attempt cap, exponential backoff per check
 - `lib/governor.js` — **Budgets**: every run's CLI-reported cost accrues into a durable monthly ledger; global and per-repo dollar caps gate autonomous launches (checks and routines). Over budget, work pauses with a decision card — manual runs are never blocked
@@ -41,7 +41,7 @@ catalog.json             The community catalog (fetched live from main by every 
 
 ## Frontend
 
-`public/app.js` is one file, organized by page: chat landing → home → repos → HQ (manager chat + rail) → checks → reflexes → routines → runs → stats → catalog → settings. Rendering is string templates + `innerHTML`; polling re-renders are snapshot-guarded and never fire while the user is typing. Icons are inline SVG (no emoji). `style.css` is GitHub-Primer-flavored monochrome with dark mode via `prefers-color-scheme`.
+`public/app.js` is one file, organized by page: chat (the global manager) → home → repos (stats + live agent monitoring per repo) → checks → reflexes → routines → runs → stats → catalog → settings. Rendering is string templates + `innerHTML`; polling re-renders are snapshot-guarded and never fire while the user is typing. Icons are inline SVG (no emoji). `style.css` is GitHub-Primer-flavored monochrome with dark mode via `prefers-color-scheme`.
 
 ## Invariants (do not break)
 

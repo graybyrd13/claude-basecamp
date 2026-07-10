@@ -11,7 +11,7 @@ import { usageReport, listRecentModels } from './lib/usage.js'
 import { openStores } from './lib/store.js'
 import { launchRun, stopRun, approveRun, denyRun, readRunLog, runningCount, EFFORT_LEVELS } from './lib/runner.js'
 import { startScheduler, nextRunTime, describeSchedule } from './lib/scheduler.js'
-import { sendChatMessage, chatBusy, chatHistory } from './lib/chat.js'
+import { sendChatMessage, chatBusy, chatHistory, compactChat, clearChat, GLOBAL_CHAT } from './lib/chat.js'
 import { gitStatus } from './lib/git.js'
 import { repoGithub, issueRunPrompt } from './lib/github.js'
 import { addConnector, removeConnector } from './lib/connectors.js'
@@ -95,8 +95,27 @@ function knownRepos(claudeDir, stores) {
     ...stores.intents.list().map((i) => i.projectPath),
     ...stores.routines.list().map((r) => r.projectPath),
     ...stores.managers.list().map((m) => m.projectPath),
-  ]
+  ].filter((p) => p && p !== GLOBAL_CHAT)
   return listRepos(claudeDir, managed)
+}
+
+/** The live repo map handed to the global manager every turn. */
+function globalChatContext(claudeDir, stores) {
+  const spend = spendReport(stores)
+  const intents = stores.intents.list()
+  const lines = knownRepos(claudeDir, stores).map((repo) => {
+    const checks = intents.filter((i) => i.projectPath === repo.path && i.enabled)
+    const holding = checks.filter((i) => i.lastStatus === 'holding').length
+    const cost = Number(spend.byRepo[repo.path]) || 0
+    const parts = [
+      `${repo.sessionCount} session${repo.sessionCount === 1 ? '' : 's'}`,
+      checks.length ? `${checks.length} check${checks.length === 1 ? '' : 's'} (${holding} passing)` : null,
+      cost ? `$${cost.toFixed(2)} spent this month` : null,
+      repo.isActive ? 'active now' : null,
+    ].filter(Boolean)
+    return `- ${repo.path} — ${parts.join(', ')}`
+  })
+  return lines.join('\n')
 }
 
 function validateRoutine(body) {
@@ -652,6 +671,7 @@ async function handleApi(req, res, url, ctx) {
             model: body.model,
             permissionMode: body.permissionMode,
             effort: body.effort,
+            context: body.projectPath === GLOBAL_CHAT ? globalChatContext(claudeDir, stores) : '',
           },
           (event) => res.write(JSON.stringify(event) + '\n')
         )
@@ -659,6 +679,16 @@ async function handleApi(req, res, url, ctx) {
         res.write(JSON.stringify({ type: 'done', error: err.message }) + '\n')
       }
       return res.end()
+    }
+    if (route === '/api/chat/compact' && method === 'POST') {
+      const body = await readBody(req)
+      if (!body.project) return json(res, 400, { error: 'project is required' })
+      return json(res, 200, await compactChat(stores, { target: body.project, port: ctx.port }))
+    }
+    if (route === '/api/chat/clear' && method === 'POST') {
+      const body = await readBody(req)
+      if (!body.project) return json(res, 400, { error: 'project is required' })
+      return json(res, 200, clearChat(stores, body.project))
     }
 
     // ---------- away digest ----------

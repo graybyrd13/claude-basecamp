@@ -47,14 +47,16 @@ Reality is checked with deterministic local facts where possible (your actual te
 
 **Recall — search everything you and Claude have ever done.** Press cmd-K and type: Recall searches every transcript on the machine — your words, Claude's replies, the commands it ran, the files it touched — with typeahead, snippets, and newest-first ranking. Click a result for the session card: what happened, plus a copy-paste `claude --resume` command that reopens that exact session. A pure-JS incremental index under `~/.claude-basecamp` (your Claude data stays read-only); ~150 sessions index in seconds, warm queries answer in milliseconds.
 
-**Talk to your repository's manager.** Every project gets a persistent agent with full Claude Code tools in that directory, plus control over Basecamp itself:
+**Talk to your manager.** One persistent agent for the whole machine, with full Claude Code tools in every repo and folder and a live map of all your repositories — plus control over Basecamp itself:
 
-> *"Keep the tests green from now on."* → it creates a standing check
+> *"Keep basecamp's tests green from now on."* → it creates a standing check on that repo
 > *"Our goal is to ship v1 by end of month — track it."* → it records the goal
-> *"Set up a hook that runs prettier after every edit."* → it edits `.claude/settings.json`
-> *"What's the state of this repo?"* → it reads the code and tells you
+> *"What needs my attention across all repos?"* → it reads the map and tells you
+> *"Set up a hook that runs prettier after every edit in the game repo."* → it edits that repo's `.claude/settings.json`
 
-Managers remember everything across sessions — close the tab, come back tomorrow, it knows where you left off.
+The conversation is persistent — close the tab, come back tomorrow, it knows where you left off. **Compact** collapses a long conversation into a handoff brief the next session starts from; **Clear** starts truly fresh. Either, any time, one click.
+
+**The Repos tab.** Every repository with its state at a glance — git status, sessions, checks passing, dollars spent this month — and the agents working in it. Click a repo to see its agents live: watch any run's log as it happens, stop it, approve it, apply or discard its clean room, flip goals, and jump into recent sessions.
 
 Every chat, routine, and background run can pick its own model, effort level, and permission mode — the model list is discovered from the models you actually use on this machine, and each repo's chat remembers its last-used choice.
 
