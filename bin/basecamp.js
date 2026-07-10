@@ -6,8 +6,12 @@ import { spawn } from 'node:child_process'
 const HELP = `claude-basecamp — a manager for every project
 
 Usage:
-  claude-basecamp [options]     Start the dashboard
-  claude-basecamp mcp           Run as an MCP server (proxies to a running dashboard)
+  claude-basecamp [options]         Start the dashboard
+  claude-basecamp mcp               Run as an MCP server (proxies to a running dashboard)
+  claude-basecamp status            Is the dashboard running? Is the daemon installed?
+  claude-basecamp daemon install    Run Basecamp at login (user-level service, no terminal needed)
+  claude-basecamp daemon uninstall  Stop and remove the login service
+  claude-basecamp daemon status     Same as status
 
 Options:
   --port <n>     Port to listen on (default: 4747, env: BASECAMP_PORT)
@@ -62,8 +66,40 @@ function openBrowser(url) {
 if (process.argv[2] === 'mcp') {
   const { startMcpServer } = await import('../src/mcp-server.js')
   startMcpServer()
+} else if (process.argv[2] === 'daemon' || process.argv[2] === 'status') {
+  await runDaemonCommand(process.argv[2] === 'status' ? 'status' : process.argv[3])
 } else {
   runDashboard()
+}
+
+async function runDaemonCommand(action) {
+  const { installDaemon, uninstallDaemon, daemonInstalled, probeServer } = await import('../src/lib/daemon.js')
+  if (action === 'install') {
+    const port = Number(process.env.BASECAMP_PORT) || 4747
+    const result = await installDaemon({ port })
+    console.log(`\n  Basecamp will now run at login (${result.platform}).`)
+    console.log(`  Service: ${result.file}`)
+    console.log(`  Command: ${result.command}`)
+    console.log(`  Dashboard: http://localhost:${port}\n`)
+    console.log(`  Note: if you usually run via npx, install globally first (npm i -g claude-basecamp)`)
+    console.log(`  so the service survives npx cache cleanup.\n`)
+    return
+  }
+  if (action === 'uninstall') {
+    const result = await uninstallDaemon()
+    console.log(`\n  Login service removed: ${result.removed}\n`)
+    return
+  }
+  if (action === 'status' || !action) {
+    const probe = await probeServer()
+    const installed = daemonInstalled()
+    console.log(`\n  Dashboard: ${probe.running ? `running on http://localhost:${probe.port} (${probe.runningTasks} active run${probe.runningTasks === 1 ? '' : 's'})` : `not running (port ${probe.port})`}`)
+    console.log(`  Login service: ${installed === null ? 'check Task Scheduler for "claude-basecamp"' : installed ? 'installed' : 'not installed'}\n`)
+    return
+  }
+  console.error(`Unknown daemon action: ${action}\n`)
+  console.log(HELP)
+  process.exit(1)
 }
 
 function runDashboard() {
