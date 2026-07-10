@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { join, extname, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { listProjects, listSessions, summarizeSession } from './lib/sessions.js'
-import { listRealProjects } from './lib/projects.js'
+import { listRepos, listRepoSessions, normalizeStorePaths } from './lib/projects.js'
 import { listAgents } from './lib/agents.js'
 import { listConnectors, listPlugins } from './lib/connectors.js'
 import { usageReport, listRecentModels } from './lib/usage.js'
@@ -85,6 +85,16 @@ function routineToJson(routine) {
   return { ...routine, scheduleLabel: describeSchedule(routine.schedule) }
 }
 
+/** Repos on the board: every repo Claude ran in, plus every repo Basecamp manages. */
+function knownRepos(claudeDir, stores) {
+  const managed = [
+    ...stores.intents.list().map((i) => i.projectPath),
+    ...stores.routines.list().map((r) => r.projectPath),
+    ...stores.managers.list().map((m) => m.projectPath),
+  ]
+  return listRepos(claudeDir, managed)
+}
+
 function validateRoutine(body) {
   const errors = []
   if (!body.name || !String(body.name).trim()) errors.push('name is required')
@@ -124,7 +134,9 @@ async function handleApi(req, res, url, ctx) {
       })
     }
     if (route === '/api/projects' && method === 'GET') {
-      const projects = listRealProjects(claudeDir)
+      // Grouped by repo root: worktrees and working subdirs fold into their
+      // repo, scratch dirs disappear. The sidebar and pickers build on this.
+      const projects = knownRepos(claudeDir, stores)
       if (url.searchParams.get('git') !== '1') return json(res, 200, projects)
       const enriched = await Promise.all(
         projects.map(async (p) => ({
@@ -138,13 +150,17 @@ async function handleApi(req, res, url, ctx) {
       // Active/recent sessions for one repo — shown inside the manager chat rail.
       const path = url.searchParams.get('path')
       if (!path) return json(res, 400, { error: 'Missing ?path= parameter' })
-      const project = listRealProjects(claudeDir).find((p) => p.path === path)
-      if (!project) return json(res, 200, [])
-      return json(res, 200, listSessions(claudeDir, project.id).slice(0, 8))
+      const repo = knownRepos(claudeDir, stores).find((p) => p.path === path)
+      if (!repo) return json(res, 200, [])
+      return json(res, 200, listRepoSessions(claudeDir, repo).slice(0, 8))
     }
     if (route === '/api/sessions' && method === 'GET') {
       const projectId = url.searchParams.get('project')
       if (!projectId) return json(res, 400, { error: 'Missing ?project= parameter' })
+      // A repo root id answers for all of its member working dirs, so one
+      // repo reads as one history; any other project id serves just itself.
+      const repo = knownRepos(claudeDir, stores).find((r) => r.id === projectId)
+      if (repo) return json(res, 200, listRepoSessions(claudeDir, repo))
       return json(res, 200, listSessions(claudeDir, projectId))
     }
     if (route === '/api/session' && method === 'GET') {
@@ -664,6 +680,10 @@ export function startServer({ port, claudeDir, host = '127.0.0.1', basecampHome 
       stores.routines.update(routine.id, { webhookToken: randomBytes(16).toString('hex') })
     }
   }
+
+  // Records keyed by subdirectory or worktree paths re-key to their repo
+  // root, so pre-grouping managers, goals, chats, and checks stay reachable.
+  normalizeStorePaths(stores)
 
   const server = createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
