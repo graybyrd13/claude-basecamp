@@ -16,6 +16,7 @@ function tempStores() {
     runs: new Store(home, 'runs'),
     updates: new Store(home, 'updates'),
     settings: new Store(home, 'settings'),
+    ledger: new Store(home, 'ledger'),
   }
 }
 
