@@ -1,0 +1,40 @@
+name: Catalog submission
+description: Add an MCP connector or skill to the one-click Catalog
+labels: [catalog]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Catalog entries ship to every Basecamp user without a release — the app fetches
+        [catalog.json](https://github.com/graybyrd13/claude-basecamp/blob/main/catalog.json) live.
+        You can also just open a PR editing catalog.json directly; this form is for proposing first.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - MCP connector (remote http/sse)
+        - MCP connector (local stdio command)
+        - Skill (from a trusted public repo)
+    validations:
+      required: true
+  - type: input
+    id: name
+    attributes:
+      label: Name
+    validations:
+      required: true
+  - type: input
+    id: endpoint
+    attributes:
+      label: URL or command
+      placeholder: "https://mcp.example.com/mcp  —or—  npx -y some-mcp-server"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: One-line description
+      description: Plain description of what it does. No sales pitch.
+    validations:
+      required: true

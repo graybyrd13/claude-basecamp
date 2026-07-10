@@ -1,0 +1,31 @@
+name: Bug report
+description: Something broke or behaved wrong
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Basecamp version
+      placeholder: "npx claude-basecamp --help | head -1, or the npm version"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS and Node version
+      placeholder: "macOS 15 / Node 22"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Server console output, or a REDACTED transcript/JSONL snippet if it's a parsing bug. Never paste private session content.
+      render: text

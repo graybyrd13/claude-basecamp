@@ -1,0 +1,28 @@
+name: Feature request
+description: Propose something Basecamp should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that Basecamp doesn't help with today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What would it look like? UI, API, manager conversation — whatever fits.
+    validations:
+      required: true
+  - type: dropdown
+    id: constraints
+    attributes:
+      label: Fits the constraints?
+      description: Basecamp is zero-dependency, localhost-only, and read-only on Claude's data (narrow opt-in exceptions).
+      options:
+        - Yes, fits within the constraints
+        - Needs an exception — explained above
+    validations:
+      required: true

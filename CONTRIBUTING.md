@@ -2,6 +2,17 @@
 
 Thanks for helping! The project is intentionally simple: **zero runtime dependencies, no build step**.
 
+## The fastest ways to contribute
+
+Most contributions don't need to touch the core:
+
+1. **Catalog entries** (5-minute PR): add an MCP connector or skill to [catalog.json](catalog.json). It ships to every user immediately — no release needed. Use the "Catalog submission" issue template or just open the PR.
+2. **Check builtins**: add a drift check for your ecosystem (Python deps, cargo audit, docs freshness) — one self-contained entry in `BUILTINS` in [src/lib/reconcile.js](src/lib/reconcile.js) plus a checker in [src/lib/checks.js](src/lib/checks.js).
+3. **Notification channels**: one function in [src/lib/notify.js](src/lib/notify.js) per channel (ntfy, Pushover, Matrix…).
+4. **Good first issues**: [browse them](https://github.com/graybyrd13/claude-basecamp/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) — each is scoped to roughly an evening.
+
+New to the codebase? [ARCHITECTURE.md](ARCHITECTURE.md) is the 5-minute map. Reviews aim for a 24-hour first response.
+
 ## Principles
 
 1. **Zero friction** — `npx claude-basecamp` must always Just Work. No config files, no database, no install steps.
