@@ -26,6 +26,9 @@ function makeRepo() {
       },
     }).trim()
   git('init', '-b', 'main')
+  // Windows checks out merged files with CRLF by default, which would break
+  // byte-for-byte content assertions after apply. Worktrees share this config.
+  git('config', 'core.autocrlf', 'false')
   writeFileSync(join(dir, 'a.txt'), 'one\n')
   git('add', '.')
   git('commit', '-m', 'first commit')

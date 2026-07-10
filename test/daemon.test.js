@@ -36,13 +36,15 @@ test('systemd unit restarts on failure and carries the environment', () => {
 })
 
 test('servicePaths picks user-level locations per platform', () => {
+  // join() uses the HOST separator, so these assertions must accept both —
+  // the Windows CI leg runs this same darwin/linux shape check.
   const mac = servicePaths('darwin', '/Users/x')
   assert.equal(mac.kind, 'launchd')
-  assert.match(mac.file, /^\/Users\/x\/Library\/LaunchAgents\/.*\.plist$/)
+  assert.match(mac.file, /Users[\\/]x[\\/]Library[\\/]LaunchAgents[\\/].*\.plist$/)
 
   const linux = servicePaths('linux', '/home/x')
   assert.equal(linux.kind, 'systemd')
-  assert.match(linux.file, /^\/home\/x\/\.config\/systemd\/user\/claude-basecamp\.service$/)
+  assert.match(linux.file, /home[\\/]x[\\/]\.config[\\/]systemd[\\/]user[\\/]claude-basecamp\.service$/)
 
   const windows = servicePaths('win32', 'C:\\Users\\x')
   assert.equal(windows.kind, 'schtasks')
