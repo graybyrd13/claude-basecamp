@@ -20,6 +20,7 @@ import { catalogWithStatus, loadCatalog, installSkill, uninstallSkill } from './
 import { findRescueCandidates, rescuePrompt, validateRescueTarget } from './lib/rescue.js'
 import { BUILTINS, reconcileIntent, intentReport, startReconciler } from './lib/reconcile.js'
 import { mineAntibodies, reflexVerdict, immuneStats, bumpCounters } from './lib/immune.js'
+import { spendReport } from './lib/governor.js'
 import { installReflexHook, uninstallReflexHook, reflexHookInstalled } from './lib/hook-installer.js'
 import { sendNotification } from './lib/notify.js'
 import { randomBytes } from 'node:crypto'
@@ -282,6 +283,17 @@ async function handleApi(req, res, url, ctx) {
     }
 
     // ---------- settings & notifications ----------
+    if (route === '/api/budget' && method === 'GET') {
+      const settings = getSettings(stores)
+      return json(res, 200, {
+        spend: spendReport(stores),
+        monthlyBudgetUsd: Number(settings.monthlyBudgetUsd) || 0,
+        repoBudgetsUsd: settings.repoBudgetsUsd || {},
+        maxConcurrentRuns: Number(settings.maxConcurrentRuns) || 2,
+        maxRunsPerDay: Number(settings.maxRunsPerDay) || 6,
+        maxFailStreak: Number(settings.maxFailStreak) || 2,
+      })
+    }
     if (route === '/api/settings' && method === 'GET') {
       return json(res, 200, getSettings(stores))
     }

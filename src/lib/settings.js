@@ -9,6 +9,12 @@ const DEFAULTS = {
   telegramChatId: '',
   macosNotifications: false,
   notifyOnSuccess: false,
+  // Governor: admission control for autonomous runs. 0 means "no cap".
+  monthlyBudgetUsd: 0,
+  repoBudgetsUsd: {},
+  maxConcurrentRuns: 2,
+  maxRunsPerDay: 6,
+  maxFailStreak: 2,
 }
 
 export function getSettings(stores) {

@@ -31,7 +31,9 @@ issue backlog triaged       -> gh-powered labeling and stale-closing
 anything in plain English   -> "the README documents every CLI flag" — checked read-only, fixed on drift
 ```
 
-Reality is checked with deterministic local facts where possible (your actual test suite, real `npm outdated`) — zero tokens spent on checks. Drift launches a bounded convergence run (concurrency-capped, daily-budgeted, approval-gated). Repeated failure **escalates to a decision card on Home** instead of retrying forever — drift is never silently ignored. Home opens with the checks report: *passing / fixing / failing / decisions needed*.
+Reality is checked with deterministic local facts where possible (your actual test suite, real `npm outdated`) — zero tokens spent on checks. Drift launches a bounded convergence run (concurrency-capped, daily-capped, approval-gated, exponentially backed off after failures). Repeated failure **escalates to a decision card on Home** instead of retrying forever — drift is never silently ignored. Home opens with the checks report: *passing / fixing / failing / decisions needed*.
+
+**Budgets — the governor.** Every autonomous run's cost (the claude CLI's own reported dollars, not an estimate) accrues into a durable monthly ledger, attributed per repo, per check, per routine. Set a monthly cap — global or per-repo — and the reconciler and scheduler stop launching when it's reached: the check pauses with a decision card and one notification, never a silent stop and never a runaway bill. Runs you start yourself are never blocked. Home shows the month's burn against the cap.
 
 **Reflexes — an immune system for your AI.** Basecamp mines every transcript for the moments you pushed back — interruptions mid-action, "no, don't—" corrections, permission denials — and turns each into an antibody. Arm the reflex hook (one click, opt-in, removable) and **every Claude session on your machine consults the immune memory before every Bash/Write/Edit action**: a mistake made twice is blocked machine-wide before it happens a third time, with the receipt injected into Claude's own context so it adapts mid-turn. One-off events only observe — the guardian never cries wolf. The stats page diagnoses the relationship both ways: *what Claude needs from you* (conventions, clearer scopes) and *what to watch in Claude* (where it overreaches).
 
@@ -118,8 +120,8 @@ This tool reads your Claude Code history and runs Claude unattended, so the secu
 
 - [x] Approval queue: runs pause on permission walls instead of being denied
 - [x] Checks: continuous reconciliation of declared desired states
-- [ ] Cross-repo resource governor: global token/attention budgeting across all checks
-- [ ] Cost guardrails: per-routine monthly budgets
+- [x] Budgets: monthly dollar caps (global and per-repo) governing all autonomous runs, real CLI-reported spend
+- [ ] Per-routine and per-check budget caps (spend is already attributed per routine and per check)
 - [ ] One-click graphify export for token-heavy sessions
 
 ## Development

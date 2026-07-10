@@ -17,17 +17,18 @@ catalog.json             The community catalog (fetched live from main by every 
 **Claude's data (read-only)** lives in `~/.claude` — session transcripts as JSONL under `projects/<encoded-path>/`, agents as markdown, MCP config in `~/.claude.json`. Parsers:
 
 - `lib/sessions.js` — fast fs-stat listing; streamed JSONL summaries cached by mtime
-- `lib/projects.js` — real repo paths from the `~/.claude.json` registry
+- `lib/projects.js` — real repo paths from the `~/.claude.json` registry, grouped by git repo root (worktrees and working subdirs fold into their repo; scratch dirs drop)
 - `lib/agents.js`, `lib/connectors.js`, `lib/usage.js` — agents, MCP servers, token aggregation
 
-**Basecamp's own state** lives in `~/.claude-basecamp/` via `lib/store.js` — a tiny JSON-collection store (insert/update/remove, temp-file + rename writes). Collections: routines, runs, updates, goals, managers, messages, settings, intents (checks), antibodies, reflex.
+**Basecamp's own state** lives in `~/.claude-basecamp/` via `lib/store.js` — a tiny JSON-collection store (insert/update/remove, temp-file + rename writes). Collections: routines, runs, updates, goals, managers, messages, settings, intents (checks), antibodies, reflex, ledger (monthly spend).
 
 ## The engines
 
 - `lib/runner.js` — spawns headless `claude -p` runs (stream-json), links resulting git commits (`lib/git.js`), pauses on permission denials as **awaiting-approval** (`approveRun`/`denyRun` resume with a one-turn grant)
 - `lib/chat.js` — per-repo **manager** conversations: `claude -p --resume <session>` with a system-prompt cookbook for Basecamp's own API
 - `lib/scheduler.js` — fires **routines** on interval/daily/weekly schedules
-- `lib/reconcile.js` + `lib/checks.js` — **Checks**: deterministic drift detection (real test suite, `npm outdated`, `gh`) or plain-English evaluation, convergence runs on failure, escalation to decision cards. Bounded: concurrency cap, daily budget per check
+- `lib/reconcile.js` + `lib/checks.js` — **Checks**: deterministic drift detection (real test suite, `npm outdated`, `gh`) or plain-English evaluation, convergence runs on failure, escalation to decision cards. Bounded: concurrency cap, daily attempt cap, exponential backoff per check
+- `lib/governor.js` — **Budgets**: every run's CLI-reported cost accrues into a durable monthly ledger; global and per-repo dollar caps gate autonomous launches (checks and routines). Over budget, work pauses with a decision card — manual runs are never blocked
 - `lib/rescue.js` — **Session Rescue**: classifies how transcripts ended; resumes dead sessions
 - `lib/immune.js` + `lib/hook-installer.js` — **Reflexes**: mines transcripts for human pushback into antibodies; an opt-in PreToolUse hook makes every session consult `/api/reflex/hook` before mutating actions
 - `lib/catalog.js` — one-click installs; remote catalog with bundled fallback, trusted-repo allowlist

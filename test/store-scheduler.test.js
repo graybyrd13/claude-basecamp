@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from '../src/lib/store.js'
 import { nextRunTime, describeSchedule, fireDueRoutines } from '../src/lib/scheduler.js'
+import { ledgerBump } from '../src/lib/governor.js'
 
 function tempStores() {
   const home = mkdtempSync(join(tmpdir(), 'basecamp-test-'))
@@ -110,5 +111,41 @@ test('fireDueRoutines launches due routines and reschedules them', () => {
   assert.equal(launched[0].effort, 'xhigh')
   const rescheduled = stores.routines.list().find((r) => r.name === 'due')
   assert.ok(rescheduled.nextRun > now)
+  rmSync(stores.home, { recursive: true, force: true })
+})
+
+test('fireDueRoutines skips launches over budget, reschedules, and says so once', () => {
+  const stores = tempStores()
+  const now = Date.now()
+  stores.settings.insert({ monthlyBudgetUsd: 1 })
+  const spent = stores.runs.insert({ projectPath: '/tmp', costUsd: 2, ledgeredUsd: 0 })
+  ledgerBump(stores, stores.runs.get(spent.id), now)
+
+  stores.routines.insert({
+    name: 'over-budget',
+    projectPath: '/tmp',
+    prompt: 'do work',
+    schedule: { type: 'interval', minutes: 60 },
+    enabled: true,
+    nextRun: now - 1000,
+  })
+
+  const launched = []
+  const fakeLaunch = (_stores, options) => {
+    launched.push(options)
+    return { id: 'fake-run' }
+  }
+
+  let fired = fireDueRoutines(stores, now, fakeLaunch)
+  assert.equal(fired.length, 0)
+  assert.equal(launched.length, 0)
+  const routine = stores.routines.list()[0]
+  assert.ok(routine.nextRun > now) // still rescheduled, not stuck due forever
+
+  // Fire the next window too: still skipped, but no duplicate card this month.
+  fireDueRoutines(stores, routine.nextRun + 1000, fakeLaunch)
+  const cards = stores.updates.list().filter((u) => u.title.startsWith('Budget paused'))
+  assert.equal(cards.length, 1)
+  assert.match(cards[0].body, /budget/i)
   rmSync(stores.home, { recursive: true, force: true })
 })

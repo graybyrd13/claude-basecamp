@@ -6,6 +6,7 @@ import { sanitizedEnv } from './env.js'
 import { headSha, commitsBetween } from './git.js'
 import { notifyRunFinished, sendNotification } from './notify.js'
 import { lastPathSegment } from './paths.js'
+import { ledgerBump } from './governor.js'
 
 const DEFAULT_TIMEOUT_MINUTES = 30
 const OUTPUT_TAIL_CHARS = 4000
@@ -78,11 +79,18 @@ function spawnTurn(stores, run, { prompt, permissionMode, model, effort, timeout
     }
     if (event.type === 'result') {
       if (Array.isArray(event.permission_denials)) permissionDenials = event.permission_denials
+      const current = stores.runs.get(run.id)
+      // Cost accumulates across approval continuations: prior turns are
+      // already ledgered, and this result reports only its own invocation.
+      const costUsd =
+        event.total_cost_usd == null
+          ? current?.costUsd ?? null
+          : (Number(current?.ledgeredUsd) || 0) + event.total_cost_usd
       stores.runs.update(run.id, {
         resultText: (event.result || lastAssistantText || '').slice(0, OUTPUT_TAIL_CHARS),
-        costUsd: event.total_cost_usd ?? null,
+        costUsd,
         numTurns: event.num_turns ?? null,
-        sessionId: event.session_id || stores.runs.get(run.id)?.sessionId || null,
+        sessionId: event.session_id || current?.sessionId || null,
       })
     }
   })
@@ -196,6 +204,7 @@ export function launchRun(stores, options, spawnFn = spawn) {
     permissionDenials: [],
     rescuedSessionId,
     intentId,
+    ledgeredUsd: 0,
   })
 
   // Snapshot HEAD so commits made by this run can be linked to it afterwards.
@@ -282,6 +291,7 @@ export function denyRun(stores, runId) {
 
 function recordRunUpdate(stores, run) {
   if (!run) return
+  ledgerBump(stores, run)
   const label = run.routineName ? `Routine “${run.routineName}”` : 'Task'
   const projectName = lastPathSegment(run.projectPath)
   const kind = run.status === 'succeeded' ? 'run-succeeded' : run.status === 'denied' ? 'run-denied' : 'run-failed'
@@ -299,6 +309,7 @@ function recordRunUpdate(stores, run) {
 }
 
 function recordAwaitingApproval(stores, run) {
+  ledgerBump(stores, run)
   const label = run.routineName ? `Routine “${run.routineName}”` : 'Task'
   const projectName = lastPathSegment(run.projectPath)
   const denial = (run.permissionDenials || [])[0]

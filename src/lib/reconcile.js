@@ -5,12 +5,11 @@ import { checkTestsGreen, checkDepsFresh, checkBacklog } from './checks.js'
 import { sendNotification } from './notify.js'
 import { lastPathSegment } from './paths.js'
 import { sanitizedEnv } from './env.js'
+import { admitRun, backoffUntil, monthKey } from './governor.js'
+import { getSettings } from './settings.js'
 
 const TICK_MS = 60 * 1000
 const DEFAULT_INTERVAL_MINUTES = 120
-const MAX_CONCURRENT_CONVERGENCE_RUNS = 2
-const MAX_RUNS_PER_DAY = 6
-const FAIL_STREAK_ESCALATION = 2
 const CUSTOM_CHECK_TIMEOUT_MS = 4 * 60 * 1000
 
 /**
@@ -151,7 +150,7 @@ export async function reconcileIntent(stores, intent, deps = {}) {
   const now = Date.now()
 
   if (result.status === 'holding') {
-    stores.intents.update(intent.id, { lastCheck: now, lastStatus: 'holding', lastDetail: result.detail, failStreak: 0, lastRunId: null })
+    stores.intents.update(intent.id, { lastCheck: now, lastStatus: 'holding', lastDetail: result.detail, failStreak: 0, lastRunId: null, nextConvergeAt: null })
     return stores.intents.get(intent.id)
   }
   if (result.status === 'unknown') {
@@ -164,22 +163,70 @@ export async function reconcileIntent(stores, intent, deps = {}) {
     return stores.intents.get(intent.id)
   }
 
-  // Drifting. Did the previous convergence attempt already fail at this?
-  const failStreak = (intent.lastRunId ? (intent.failStreak || 0) + 1 : intent.failStreak || 0)
-  if (failStreak >= FAIL_STREAK_ESCALATION) {
+  // Drifting. Account the previous convergence attempt exactly once: seeing
+  // lastRunId here means that attempt ran and the intent still drifts, so
+  // every exit below clears lastRunId (the launch path sets a fresh one).
+  const settings = getSettings(stores)
+  const attemptFailed = Boolean(intent.lastRunId)
+  const failStreak = attemptFailed ? (intent.failStreak || 0) + 1 : intent.failStreak || 0
+  if (failStreak >= (Number(settings.maxFailStreak) || 2)) {
     escalate(stores, intent, `${failStreak} convergence attempts did not restore this intent. Latest: ${result.detail}`)
-    stores.intents.update(intent.id, { lastCheck: now, lastRunId: null })
+    stores.intents.update(intent.id, { lastCheck: now, lastRunId: null, nextConvergeAt: null })
     return stores.intents.get(intent.id)
   }
 
-  // Guardrails: bounded concurrency and bounded daily attempts, never silent.
-  if (convergenceRunsLive(stores) >= MAX_CONCURRENT_CONVERGENCE_RUNS) {
-    stores.intents.update(intent.id, { lastCheck: now, lastStatus: 'drifting', lastDetail: `${result.detail} (queued: convergence capacity in use)`, failStreak })
+  // Failed attempts back off exponentially — a doomed intent must not eat
+  // the month's budget retrying. Checks keep running; launches wait.
+  const nextConvergeAt = attemptFailed
+    ? backoffUntil(failStreak, intent.intervalMinutes || DEFAULT_INTERVAL_MINUTES, now)
+    : intent.nextConvergeAt || 0
+  if (nextConvergeAt > now) {
+    stores.intents.update(intent.id, {
+      lastCheck: now,
+      lastStatus: 'drifting',
+      lastDetail: `${result.detail} (backing off after ${failStreak} failed attempt${failStreak === 1 ? '' : 's'}; next attempt ${new Date(nextConvergeAt).toLocaleString()})`,
+      failStreak,
+      lastRunId: null,
+      nextConvergeAt,
+    })
     return stores.intents.get(intent.id)
   }
-  if (runsToday(stores, intent.id) >= MAX_RUNS_PER_DAY) {
-    escalate(stores, intent, `Daily convergence budget (${MAX_RUNS_PER_DAY} runs) exhausted while still drifting: ${result.detail}`)
+
+  // Guardrails: bounded concurrency, bounded daily attempts, and the monthly
+  // budget — never silent.
+  if (convergenceRunsLive(stores) >= (Number(settings.maxConcurrentRuns) || 2)) {
+    stores.intents.update(intent.id, { lastCheck: now, lastStatus: 'drifting', lastDetail: `${result.detail} (queued: convergence capacity in use)`, failStreak, lastRunId: null })
+    return stores.intents.get(intent.id)
+  }
+  if (runsToday(stores, intent.id) >= (Number(settings.maxRunsPerDay) || 6)) {
+    escalate(stores, intent, `Daily convergence budget (${Number(settings.maxRunsPerDay) || 6} runs) exhausted while still drifting: ${result.detail}`)
     stores.intents.update(intent.id, { lastCheck: now, lastRunId: null })
+    return stores.intents.get(intent.id)
+  }
+  const verdict = admitRun(stores, { projectPath: intent.projectPath }, now)
+  if (!verdict.ok) {
+    const month = monthKey(now)
+    if (intent.budgetEscalatedMonth !== month) {
+      stores.updates.insert({
+        kind: 'decision-needed',
+        intentId: intent.id,
+        projectPath: intent.projectPath,
+        title: `Budget paused: "${intent.label}" in ${lastPathSegment(intent.projectPath)}`,
+        body: `${verdict.reason}. Raise the cap in Settings or wait for the month to roll over.`,
+      })
+      sendNotification(stores, {
+        title: `Budget paused in ${lastPathSegment(intent.projectPath)}`,
+        body: `${intent.label}: ${verdict.reason}`.slice(0, 300),
+      }).catch(() => {})
+    }
+    stores.intents.update(intent.id, {
+      lastCheck: now,
+      lastStatus: 'budget-paused',
+      lastDetail: `${verdict.reason} — still drifting: ${result.detail}`,
+      failStreak,
+      lastRunId: null,
+      budgetEscalatedMonth: month,
+    })
     return stores.intents.get(intent.id)
   }
 
@@ -198,9 +245,9 @@ export async function reconcileIntent(stores, intent, deps = {}) {
       allowedTools: builtin ? builtin.allowedTools : CONVERGENCE_ALLOWED,
       intentId: intent.id,
     })
-    stores.intents.update(intent.id, { lastCheck: now, lastStatus: 'converging', lastDetail: result.detail, lastRunId: run.id, failStreak })
+    stores.intents.update(intent.id, { lastCheck: now, lastStatus: 'converging', lastDetail: result.detail, lastRunId: run.id, failStreak, nextConvergeAt: null })
   } catch (err) {
-    stores.intents.update(intent.id, { lastCheck: now, lastStatus: 'drifting', lastDetail: `${result.detail} (launch failed: ${err.message})`, failStreak })
+    stores.intents.update(intent.id, { lastCheck: now, lastStatus: 'drifting', lastDetail: `${result.detail} (launch failed: ${err.message})`, failStreak, lastRunId: null })
   }
   return stores.intents.get(intent.id)
 }
@@ -227,6 +274,7 @@ export function intentReport(stores) {
     holding: intents.filter((i) => i.lastStatus === 'holding').length,
     drifting: intents.filter((i) => i.lastStatus === 'drifting').length,
     converging: intents.filter((i) => i.lastStatus === 'converging').length,
+    budgetPaused: intents.filter((i) => i.lastStatus === 'budget-paused').length,
     decisions: intents.filter((i) => i.lastStatus === 'decision-needed'),
     unknown: intents.filter((i) => !i.lastStatus || i.lastStatus === 'unknown').length,
   }

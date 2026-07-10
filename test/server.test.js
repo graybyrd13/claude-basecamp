@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startServer } from '../src/server.js'
+import { ledgerBump } from '../src/lib/governor.js'
 
 const FIXTURE_DIR = join(fileURLToPath(new URL('.', import.meta.url)), 'fixtures', 'claude-dir')
 
@@ -51,6 +52,24 @@ test('serves dashboard and read-only API endpoints', async (t) => {
 
   const traversal = await fetch(`${base}/..%2f..%2fpackage.json`)
   assert.notEqual(traversal.status, 200)
+})
+
+test('budget endpoint reports month-to-date spend and caps', async (t) => {
+  const { base, stores } = await withServerAndStores(t)
+
+  const before = await (await fetch(`${base}/api/budget`)).json()
+  assert.equal(before.spend.totalUsd, 0)
+  assert.equal(before.monthlyBudgetUsd, 0)
+
+  stores.settings.insert({ monthlyBudgetUsd: 5 })
+  const run = stores.runs.insert({ projectPath: '/repo', costUsd: 1.25, ledgeredUsd: 0 })
+  ledgerBump(stores, stores.runs.get(run.id))
+
+  const after = await (await fetch(`${base}/api/budget`)).json()
+  assert.equal(after.monthlyBudgetUsd, 5)
+  assert.equal(after.spend.totalUsd, 1.25)
+  assert.equal(after.spend.byRepo['/repo'], 1.25)
+  assert.equal(after.spend.runs, 1)
 })
 
 test('routine CRUD lifecycle over the API', async (t) => {

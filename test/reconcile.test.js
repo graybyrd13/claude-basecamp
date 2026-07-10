@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { Store } from '../src/lib/store.js'
 import { reconcileIntent, reconcileDue, intentReport, BUILTINS } from '../src/lib/reconcile.js'
 import { detectTestCommand } from '../src/lib/checks.js'
+import { ledgerBump } from '../src/lib/governor.js'
 
 function tempStores() {
   const home = mkdtempSync(join(tmpdir(), 'basecamp-reconcile-'))
@@ -164,6 +165,58 @@ test('intentReport aggregates statuses', () => {
   assert.equal(report.holding, 1)
   assert.equal(report.drifting, 1)
   assert.equal(report.decisions.length, 1)
+  rmSync(stores.home, { recursive: true, force: true })
+})
+
+test('a failed attempt is accounted once, not re-counted every later cycle', async () => {
+  const stores = tempStores()
+  const failedRun = stores.runs.insert({ status: 'succeeded', startedAt: Date.now() })
+  const intent = makeIntent(stores, { lastRunId: failedRun.id, failStreak: 0 })
+  const drift = { check: async () => ({ status: 'drifting', detail: 'red' }), launch: fakeLaunch([]) }
+
+  let result = await reconcileIntent(stores, intent, drift)
+  assert.equal(result.failStreak, 1)
+  assert.equal(result.lastRunId, null)
+
+  result = await reconcileIntent(stores, stores.intents.get(intent.id), drift)
+  assert.equal(result.failStreak, 1) // same failure, one count — never inflated
+  rmSync(stores.home, { recursive: true, force: true })
+})
+
+test('backoff: after a failed attempt the next launch waits, checks keep running', async () => {
+  const stores = tempStores()
+  const failedRun = stores.runs.insert({ status: 'succeeded', startedAt: Date.now() })
+  const intent = makeIntent(stores, { lastRunId: failedRun.id })
+  const calls = []
+  const result = await reconcileIntent(stores, intent, {
+    check: async () => ({ status: 'drifting', detail: 'still red' }),
+    launch: fakeLaunch(calls),
+  })
+  assert.equal(calls.length, 0)
+  assert.equal(result.lastStatus, 'drifting')
+  assert.match(result.lastDetail, /backing off/i)
+  assert.ok(result.nextConvergeAt > Date.now())
+  rmSync(stores.home, { recursive: true, force: true })
+})
+
+test('budget exhausted: intent pauses with one card, not one per cycle', async () => {
+  const stores = tempStores()
+  stores.settings.insert({ monthlyBudgetUsd: 1 })
+  const spent = stores.runs.insert({ projectPath: '/repo', costUsd: 2, ledgeredUsd: 0 })
+  ledgerBump(stores, stores.runs.get(spent.id))
+
+  const intent = makeIntent(stores)
+  const calls = []
+  const drift = { check: async () => ({ status: 'drifting', detail: 'red' }), launch: fakeLaunch(calls) }
+
+  let result = await reconcileIntent(stores, intent, drift)
+  assert.equal(result.lastStatus, 'budget-paused')
+  assert.equal(calls.length, 0)
+  assert.match(result.lastDetail, /budget/i)
+
+  await reconcileIntent(stores, stores.intents.get(intent.id), drift)
+  const cards = stores.updates.list().filter((u) => u.title.startsWith('Budget paused'))
+  assert.equal(cards.length, 1)
   rmSync(stores.home, { recursive: true, force: true })
 })
 

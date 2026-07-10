@@ -588,7 +588,7 @@ function userIsTyping() {
 }
 
 async function renderHome(force = false) {
-  const [overview, updates, runs, routines, digest, rescue, report, intents] = await Promise.all([
+  const [overview, updates, runs, routines, digest, rescue, report, intents, budget] = await Promise.all([
     api('/api/overview'),
     api('/api/updates'),
     api('/api/runs'),
@@ -597,10 +597,11 @@ async function renderHome(force = false) {
     api('/api/rescue').catch(() => []),
     api('/api/intents/report').catch(() => null),
     api('/api/intents').catch(() => []),
+    api('/api/budget').catch(() => null),
   ])
   // Re-render only when something actually changed — a silent poll must never
   // wipe scroll position or a half-typed decision.
-  const snapshot = JSON.stringify([overview, updates.slice(0, 25), runs.slice(0, 45), routines, digest, rescue, report])
+  const snapshot = JSON.stringify([overview, updates.slice(0, 25), runs.slice(0, 45), routines, digest, rescue, report, budget])
   if (!force && snapshot === renderHome._snapshot) return
   if (!force && userIsTyping()) return
   renderHome._snapshot = snapshot
@@ -628,7 +629,7 @@ async function renderHome(force = false) {
         <div class="digest" style="border-left-color:${report.decisions.length ? 'var(--red)' : report.drifting ? 'var(--attention)' : 'var(--green)'}">
           <div class="d-head">${icon('pulse', 15)} Checks
             <span class="muted" style="font-weight:400">
-              ${report.holding} passing${report.converging ? ` · ${report.converging} fixing` : ''}${report.drifting ? ` · ${report.drifting} failing` : ''}${report.unknown ? ` · ${report.unknown} unknown` : ''}
+              ${report.holding} passing${report.converging ? ` · ${report.converging} fixing` : ''}${report.drifting ? ` · ${report.drifting} failing` : ''}${report.budgetPaused ? ` · ${report.budgetPaused} over budget` : ''}${report.unknown ? ` · ${report.unknown} unknown` : ''}
             </span>
             <button class="btn small" style="margin-left:auto" data-page-link="intents">All checks</button>
           </div>
@@ -641,6 +642,17 @@ async function renderHome(force = false) {
                 <button class="btn small primary" data-decide="${i.id}">Decide</button>
               </div>
             </div>`).join('')}
+        </div>` : ''}
+
+      ${budget && (budget.monthlyBudgetUsd > 0 || budget.spend.totalUsd > 0) ? `
+        <div class="box box-pad" style="display:flex;align-items:center;gap:12px;padding:10px 14px;flex-wrap:wrap">
+          <span style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px">${icon('pulse', 14)} Autonomy spend</span>
+          <span class="muted" style="font-size:12.5px">$${budget.spend.totalUsd.toFixed(2)} this month${budget.monthlyBudgetUsd ? ` of $${budget.monthlyBudgetUsd} cap` : ' — no cap set'} · ${budget.spend.runs} run${budget.spend.runs === 1 ? '' : 's'}</span>
+          ${budget.monthlyBudgetUsd ? `
+            <div style="flex:1;min-width:120px;max-width:220px;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+              <div style="height:100%;width:${Math.min(100, (budget.spend.totalUsd / budget.monthlyBudgetUsd) * 100).toFixed(0)}%;background:${budget.spend.totalUsd >= budget.monthlyBudgetUsd ? 'var(--red)' : 'var(--green)'}"></div>
+            </div>` : ''}
+          <button class="btn small" style="margin-left:auto" data-page-link="settings">Budgets</button>
         </div>` : ''}
 
       ${showDigest ? `
@@ -1560,6 +1572,7 @@ const intentStatusChip = (status) =>
     drifting: `<span class="chip" style="color:var(--attention);border-color:var(--attention)">drifting</span>`,
     converging: `<span class="chip green"><span class="dot green pulse"></span>converging</span>`,
     'decision-needed': `<span class="chip red">decision needed</span>`,
+    'budget-paused': `<span class="chip" style="color:var(--attention);border-color:var(--attention)">over budget</span>`,
     unknown: `<span class="chip">unknown</span>`,
   })[status] || `<span class="chip">not checked yet</span>`
 
@@ -1835,7 +1848,11 @@ async function catalogAction(btn, action) {
 /* ---------- Settings ---------- */
 
 async function renderSettings() {
-  const s = await api('/api/settings')
+  const [s, budget, repos] = await Promise.all([
+    api('/api/settings'),
+    api('/api/budget').catch(() => null),
+    api('/api/projects').catch(() => []),
+  ])
   main.innerHTML = `
     <div class="page">
       <h1>Settings</h1>
@@ -1868,6 +1885,44 @@ async function renderSettings() {
             <button type="submit" class="btn primary">Save</button>
             <button type="button" class="btn" id="test-notify">Send test notification</button>
             <span id="settings-status" class="muted" style="align-self:center;font-size:12.5px"></span>
+          </div>
+        </form>
+      </div>
+
+      <h2>Autonomy budget</h2>
+      <div class="box box-pad" style="max-width:560px">
+        <p class="muted" style="font-size:13px;margin-bottom:8px">Caps apply to autonomous runs — checks and routines. Runs you start yourself are never blocked. Spend is the claude CLI's own reported cost. 0 means no cap.${budget ? ` Spent this month: <strong>$${budget.spend.totalUsd.toFixed(2)}</strong> across ${budget.spend.runs} run${budget.spend.runs === 1 ? '' : 's'}.` : ''}</p>
+        <form id="budget-form">
+          <div class="field-row">
+            <label class="field">Monthly budget (USD)
+              <input name="monthlyBudgetUsd" type="number" min="0" step="0.5" value="${Number(s.monthlyBudgetUsd) || 0}" />
+            </label>
+            <label class="field">Max concurrent runs
+              <input name="maxConcurrentRuns" type="number" min="1" step="1" value="${Number(s.maxConcurrentRuns) || 2}" />
+            </label>
+          </div>
+          <div class="field-row">
+            <label class="field">Max runs per day per check
+              <input name="maxRunsPerDay" type="number" min="1" step="1" value="${Number(s.maxRunsPerDay) || 6}" />
+            </label>
+            <label class="field">Escalate after failed attempts
+              <input name="maxFailStreak" type="number" min="1" step="1" value="${Number(s.maxFailStreak) || 2}" />
+            </label>
+          </div>
+          ${repos.length ? `
+            <div class="field" style="margin-top:4px">
+              <span style="font-weight:600;font-size:13px">Per-repository caps (USD / month)</span>
+              ${repos.map((r) => `
+                <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+                  <span style="flex:1;font-size:13px">${esc(repoName(r.path))}
+                    ${budget?.spend.byRepo[r.path] ? `<span class="muted" style="font-size:12px"> · $${Number(budget.spend.byRepo[r.path]).toFixed(2)} spent</span>` : ''}
+                  </span>
+                  <input data-repo-budget="${esc(r.path)}" type="number" min="0" step="0.5" value="${Number(s.repoBudgetsUsd?.[r.path]) || 0}" style="width:110px" />
+                </div>`).join('')}
+            </div>` : ''}
+          <div class="modal-actions" style="justify-content:flex-start">
+            <button type="submit" class="btn primary">Save budget</button>
+            <span id="budget-status" class="muted" style="align-self:center;font-size:12.5px"></span>
           </div>
         </form>
       </div>
@@ -1911,6 +1966,28 @@ async function renderSettings() {
     status.textContent = results.length
       ? results.map((r) => `${r.channel}: ${r.ok ? 'ok' : r.error || 'failed'}`).join(' · ')
       : 'No channels configured'
+  })
+
+  const budgetForm = $('#budget-form')
+  budgetForm.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const repoBudgetsUsd = {}
+    budgetForm.querySelectorAll('[data-repo-budget]').forEach((input) => {
+      const cap = Number(input.value)
+      if (cap > 0) repoBudgetsUsd[input.dataset.repoBudget] = cap
+    })
+    await api('/api/settings', {
+      method: 'PUT',
+      body: {
+        monthlyBudgetUsd: Math.max(0, Number(budgetForm.monthlyBudgetUsd.value) || 0),
+        maxConcurrentRuns: Math.max(1, Number(budgetForm.maxConcurrentRuns.value) || 2),
+        maxRunsPerDay: Math.max(1, Number(budgetForm.maxRunsPerDay.value) || 6),
+        maxFailStreak: Math.max(1, Number(budgetForm.maxFailStreak.value) || 2),
+        repoBudgetsUsd,
+      },
+    })
+    $('#budget-status').textContent = 'Saved'
+    setTimeout(() => { $('#budget-status').textContent = '' }, 2000)
   })
 }
 

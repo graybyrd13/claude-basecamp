@@ -1,4 +1,6 @@
 import { launchRun } from './runner.js'
+import { admitRun, monthKey } from './governor.js'
+import { lastPathSegment } from './paths.js'
 
 const TICK_MS = 30 * 1000
 
@@ -52,6 +54,28 @@ export function fireDueRoutines(stores, now = Date.now(), launch = launchRun) {
   const fired = []
   for (const routine of stores.routines.list()) {
     if (!routine.enabled || !routine.nextRun || routine.nextRun > now) continue
+
+    // The governor gates scheduled spend too: over budget, a routine skips
+    // its window (still rescheduled) and says so once per month.
+    const verdict = admitRun(stores, { projectPath: routine.projectPath }, now)
+    if (!verdict.ok) {
+      const month = monthKey(now)
+      if (routine.budgetEscalatedMonth !== month) {
+        stores.updates.insert({
+          kind: 'decision-needed',
+          routineId: routine.id,
+          projectPath: routine.projectPath,
+          title: `Budget paused: routine “${routine.name}” in ${lastPathSegment(routine.projectPath)}`,
+          body: `${verdict.reason}. Raise the cap in Settings or wait for the month to roll over.`,
+        })
+      }
+      stores.routines.update(routine.id, {
+        nextRun: nextRunTime(routine.schedule, now),
+        budgetEscalatedMonth: month,
+      })
+      continue
+    }
+
     stores.routines.update(routine.id, {
       nextRun: nextRunTime(routine.schedule, now),
       lastRun: now,
