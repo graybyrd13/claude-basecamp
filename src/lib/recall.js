@@ -77,6 +77,7 @@ async function tokenizeSession(filePath) {
 async function snippetFor(filePath, tokens) {
   try {
     const stream = createReadStream(filePath, { encoding: 'utf8' })
+    const closed = new Promise((resolve) => stream.once('close', resolve))
     const rl = createInterface({ input: stream, crlfDelay: Infinity })
     for await (const line of rl) {
       let entry
@@ -94,6 +95,9 @@ async function snippetFor(filePath, tokens) {
           const clipped = text.slice(start, at + token.length + SNIPPET_RADIUS).replace(/\s+/g, ' ').trim()
           rl.close()
           stream.destroy()
+          // Wait for the fd to actually close — Windows cannot delete a
+          // transcript while an early-exited snippet read still holds it.
+          await closed
           return (start > 0 ? '…' : '') + clipped
         }
       }

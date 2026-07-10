@@ -9,8 +9,15 @@ function world(t) {
   const claudeDir = mkdtempSync(join(tmpdir(), 'basecamp-recall-claude-'))
   const home = mkdtempSync(join(tmpdir(), 'basecamp-recall-home-'))
   t.after(() => {
-    rmSync(claudeDir, { recursive: true, force: true })
-    rmSync(home, { recursive: true, force: true })
+    // Best-effort: Windows can hold a just-closed stream's handle past any
+    // reasonable retry window — see the identical note in runner.test.js.
+    for (const dir of [claudeDir, home]) {
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+      } catch {
+        /* locked on Windows — the OS temp cleaner owns it now */
+      }
+    }
   })
   return { claudeDir, home }
 }
