@@ -70,6 +70,26 @@ test('budget endpoint reports month-to-date spend and caps', async (t) => {
   assert.equal(after.spend.totalUsd, 1.25)
   assert.equal(after.spend.byRepo['/repo'], 1.25)
   assert.equal(after.spend.runs, 1)
+
+  // Hostile or garbage numbers must clamp server-side — a negative cap would
+  // otherwise compare true on every reconcile tick.
+  await fetch(`${base}/api/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      monthlyBudgetUsd: 'abc',
+      maxConcurrentRuns: -3,
+      maxRunsPerDay: 'NaN',
+      maxFailStreak: 0,
+      repoBudgetsUsd: { '/bad': 'x', '/ok': 2, '/neg': -1 },
+    }),
+  })
+  const clamped = await (await fetch(`${base}/api/budget`)).json()
+  assert.equal(clamped.monthlyBudgetUsd, 0)
+  assert.equal(clamped.maxConcurrentRuns, 1)
+  assert.equal(clamped.maxRunsPerDay, 6)
+  assert.equal(clamped.maxFailStreak, 1)
+  assert.deepEqual(clamped.repoBudgetsUsd, { '/ok': 2 })
 })
 
 test('routine CRUD lifecycle over the API', async (t) => {

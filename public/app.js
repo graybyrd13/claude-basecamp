@@ -713,7 +713,7 @@ async function renderHome(force = false) {
       ${budget && (budget.monthlyBudgetUsd > 0 || budget.spend.totalUsd > 0) ? `
         <div class="box box-pad" style="display:flex;align-items:center;gap:12px;padding:10px 14px;flex-wrap:wrap">
           <span style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px">${icon('pulse', 14)} Autonomy spend</span>
-          <span class="muted" style="font-size:12.5px">$${budget.spend.totalUsd.toFixed(2)} this month${budget.monthlyBudgetUsd ? ` of $${budget.monthlyBudgetUsd} cap` : ' — no cap set'} · ${budget.spend.runs} run${budget.spend.runs === 1 ? '' : 's'}</span>
+          <span class="muted" style="font-size:12.5px">$${budget.spend.totalUsd.toFixed(2)} this month${budget.monthlyBudgetUsd ? ` of $${Number(budget.monthlyBudgetUsd).toFixed(2)} cap` : ' — no cap set'} · ${budget.spend.runs} run${budget.spend.runs === 1 ? '' : 's'}</span>
           ${budget.monthlyBudgetUsd ? `
             <div style="flex:1;min-width:120px;max-width:220px;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
               <div style="height:100%;width:${Math.min(100, (budget.spend.totalUsd / budget.monthlyBudgetUsd) * 100).toFixed(0)}%;background:${budget.spend.totalUsd >= budget.monthlyBudgetUsd ? 'var(--red)' : 'var(--green)'}"></div>

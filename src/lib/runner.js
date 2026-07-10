@@ -367,6 +367,9 @@ export function stopRun(stores, runId) {
   const child = liveProcesses.get(runId)
   if (!child) return false
   child.kill('SIGTERM')
+  // A mid-flight result may already carry cost; ledger it before the status
+  // change makes the exit handler bail out, or the spend is silently lost.
+  ledgerBump(stores, stores.runs.get(runId))
   stores.runs.update(runId, { status: 'stopped', endedAt: Date.now(), error: 'stopped by user' })
   liveProcesses.delete(runId)
   return true

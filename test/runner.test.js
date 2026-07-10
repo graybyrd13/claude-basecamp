@@ -8,7 +8,8 @@ import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { once } from 'node:events'
 import { Store } from '../src/lib/store.js'
-import { launchRun, approveRun, denyRun } from '../src/lib/runner.js'
+import { launchRun, approveRun, denyRun, stopRun } from '../src/lib/runner.js'
+import { spendReport } from '../src/lib/governor.js'
 
 /**
  * Best-effort temp-dir removal. Windows can hold the just-ended log stream's
@@ -243,6 +244,76 @@ test('denyRun rejects runs that are not awaiting approval', () => {
   const run = stores.runs.insert({ projectPath: '/tmp', status: 'succeeded' })
   assert.throws(() => denyRun(stores, run.id), /awaiting approval/)
   cleanup(stores.home)
+})
+
+test('cost accumulates across an approval continuation and ledgers exactly once', async () => {
+  const stores = tempStores()
+  const projectPath = tempProjectDir()
+  const children = []
+  const fakeSpawn = () => {
+    const child = fakeChild()
+    children.push(child)
+    return child
+  }
+
+  const run = launchRun(stores, { projectPath, prompt: 'do the work' }, fakeSpawn)
+  await finishTurn(children[0], [
+    { type: 'system', subtype: 'init', session_id: 'sess-cost' },
+    {
+      type: 'result',
+      result: 'need approval',
+      session_id: 'sess-cost',
+      total_cost_usd: 0.3,
+      permission_denials: [{ tool_name: 'Bash', tool_use_id: 't1', tool_input: { command: 'rm x' } }],
+    },
+  ])
+  const paused = await settled(stores, run.id)
+  assert.equal(paused.status, 'awaiting-approval')
+  assert.equal(paused.costUsd.toFixed(2), '0.30')
+  assert.equal(spendReport(stores).totalUsd.toFixed(2), '0.30') // pausing ledgers turn one
+
+  approveRun(stores, run.id, {}, fakeSpawn)
+  await finishTurn(children[1], [
+    // The CLI reports each invocation's own cost — the run must accumulate.
+    { type: 'result', result: 'done', session_id: 'sess-cost', total_cost_usd: 0.2 },
+  ])
+  const finished = await settled(stores, run.id)
+  assert.equal(finished.status, 'succeeded')
+  assert.equal(finished.costUsd.toFixed(2), '0.50') // cumulative, not overwritten
+  assert.equal(spendReport(stores).totalUsd.toFixed(2), '0.50') // delta-accrued, not 0.80
+  assert.equal(spendReport(stores).runs, 1) // one run, however many turns
+  cleanup(stores.home, projectPath)
+})
+
+test('stopping a run ledgers cost already reported mid-flight', async () => {
+  const stores = tempStores()
+  const projectPath = tempProjectDir()
+  const children = []
+  const fakeSpawn = () => {
+    const child = fakeChild()
+    children.push(child)
+    return child
+  }
+
+  const run = launchRun(stores, { projectPath, prompt: 'long task' }, fakeSpawn)
+  // A result line arrives (cost incurred) but the process lingers; the user stops it.
+  children[0].stdout.write(
+    JSON.stringify({ type: 'result', result: 'turn one done', session_id: 's', total_cost_usd: 0.4 }) + '\n'
+  )
+  await waitFor(() => Number(stores.runs.get(run.id).costUsd) > 0)
+
+  // Real processes exit on a later tick than kill(); the synchronous default
+  // in fakeChild would interleave the exit handler mid-stopRun.
+  children[0].kill = () => setImmediate(() => children[0].emit('exit', null, 'SIGTERM'))
+  stopRun(stores, run.id)
+  const stopped = stores.runs.get(run.id)
+  assert.equal(stopped.status, 'stopped')
+  assert.equal(spendReport(stores).totalUsd.toFixed(2), '0.40') // spend never silently lost
+
+  children[0].stdout.end()
+  children[0].stderr.end()
+  await new Promise((resolve) => setImmediate(resolve))
+  cleanup(stores.home, projectPath)
 })
 
 function makeGitRepo() {

@@ -109,7 +109,7 @@ function convergenceRunsLive(stores) {
 }
 
 function escalate(stores, intent, detail) {
-  stores.intents.update(intent.id, { lastStatus: 'decision-needed', lastDetail: detail, failStreak: 0 })
+  stores.intents.update(intent.id, { lastStatus: 'decision-needed', lastDetail: detail, failStreak: 0, lastRunId: null })
   stores.updates.insert({
     kind: 'decision-needed',
     intentId: intent.id,
