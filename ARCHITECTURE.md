@@ -32,6 +32,7 @@ catalog.json             The community catalog (fetched live from main by every 
 - `lib/cleanroom.js` — **Clean rooms**: runs execute in disposable git worktrees on their own branches; commits come back as a reviewable diff with apply (ff/merge, conflict-safe abort) and discard. Boot sweep prunes settled rooms
 - `lib/manifest.js` — **Manifests**: `.basecamp/manifest.json` declares a repo's checks as code. Adoption is explicit and hash-pinned; changed manifests pause their checks until re-adopted; export shares your checks with everyone who clones
 - `lib/daemon.js` — **Always On**: opt-in user-level login service (launchd/systemd-user/schtasks) so the loop runs without a terminal; `status` probes the port and the service
+- `lib/recall.js` — **Recall**: incremental inverted index over every transcript (mtime-swept, persisted to `recall-index.json`, AND queries with trailing-prefix typeahead, on-demand snippets). Feeds the cmd-K palette
 - `lib/rescue.js` — **Session Rescue**: classifies how transcripts ended; resumes dead sessions
 - `lib/immune.js` + `lib/hook-installer.js` — **Reflexes**: mines transcripts for human pushback into antibodies; an opt-in PreToolUse hook makes every session consult `/api/reflex/hook` before mutating actions
 - `lib/catalog.js` — one-click installs; remote catalog with bundled fallback, trusted-repo allowlist

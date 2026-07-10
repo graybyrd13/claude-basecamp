@@ -92,6 +92,22 @@ test('budget endpoint reports month-to-date spend and caps', async (t) => {
   assert.deepEqual(clamped.repoBudgetsUsd, { '/ok': 2 })
 })
 
+test('recall endpoint indexes the fixture history and finds sessions', async (t) => {
+  const base = await withServer(t)
+
+  // First query kicks the build; poll briefly until it settles.
+  let res = await (await fetch(`${base}/api/recall?q=hello`)).json()
+  for (let i = 0; i < 100 && res.building; i++) {
+    await new Promise((r) => setTimeout(r, 20))
+    res = await (await fetch(`${base}/api/recall?q=hello`)).json()
+  }
+  assert.equal(res.building, false)
+  assert.ok(Array.isArray(res.results))
+
+  const empty = await (await fetch(`${base}/api/recall?q=`)).json()
+  assert.deepEqual(empty.results, [])
+})
+
 test('routine CRUD lifecycle over the API', async (t) => {
   const base = await withServer(t)
 

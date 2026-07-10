@@ -2170,7 +2170,59 @@ function closePalette() {
 function paletteMatches(query) {
   const q = query.trim().toLowerCase()
   if (!q) return palette.items
-  return palette.items.filter((item) => (item.label.toLowerCase() + ' ' + item.keywords).includes(q))
+  const items = palette.items.filter((item) => (item.label.toLowerCase() + ' ' + item.keywords).includes(q))
+
+  // Recall: sessions from your entire history that match the query.
+  const recall = palette.recall
+  if (recall && recall.query.toLowerCase() === q) {
+    if (recall.building) {
+      items.push({
+        label: `Indexing your history… ${recall.progress.done}/${recall.progress.total || '?'}`,
+        hint: 'recall',
+        iconName: 'clock',
+        keywords: '',
+        action: () => {},
+      })
+    }
+    for (const result of recall.results) {
+      items.push({
+        label: result.title || result.snippet || result.sessionId.slice(0, 8),
+        hint: `${repoName(result.path)} · ${fmtTime(result.lastModified)}`,
+        iconName: 'clock',
+        keywords: '',
+        action: () => openSessionCard(result),
+      })
+    }
+  }
+  return items
+}
+
+async function openSessionCard(result) {
+  const summary = await api(
+    `/api/session?project=${encodeURIComponent(result.projectId)}&id=${encodeURIComponent(result.sessionId)}`
+  ).catch(() => null)
+  const resume = `claude --resume ${result.sessionId}`
+  openModal(`
+    <h2>${esc(summary?.title || result.title || 'Session')}</h2>
+    <p class="muted" style="font-size:12.5px;margin-bottom:10px">
+      ${esc(repoName(result.path))} · ${fmtTime(result.lastModified)}${summary ? ` · ${summary.userMessages} message${summary.userMessages === 1 ? '' : 's'} · ${summary.toolCalls} tool call${summary.toolCalls === 1 ? '' : 's'}` : ''}
+    </p>
+    ${result.snippet ? `<div class="log-view" style="max-height:120px">${esc(result.snippet)}</div>` : ''}
+    <p class="muted" style="font-size:12.5px;margin-top:10px">Resume this exact session in a terminal, inside ${esc(result.path)}:</p>
+    <div class="log-view" style="max-height:none">${esc(resume)}</div>
+    <div class="modal-actions">
+      <button type="button" class="btn" data-close>Close</button>
+      <button type="button" class="btn" id="copy-resume">Copy resume command</button>
+      <button type="button" class="btn primary" id="open-manager-from-session">Open manager</button>
+    </div>`)
+  $('#copy-resume')?.addEventListener('click', async () => {
+    await navigator.clipboard.writeText(resume)
+    $('#copy-resume').textContent = 'Copied'
+  })
+  $('#open-manager-from-session')?.addEventListener('click', () => {
+    closeModal()
+    openHQ(result.path)
+  })
 }
 
 function renderPaletteList(query) {
@@ -2200,9 +2252,26 @@ $('#palette-trigger').addEventListener('click', openPalette)
 $('#palette-backdrop').addEventListener('click', (e) => {
   if (e.target.id === 'palette-backdrop') closePalette()
 })
+let recallTimer = null
 $('#palette-input').addEventListener('input', (e) => {
   palette.selected = 0
   renderPaletteList(e.target.value)
+  clearTimeout(recallTimer)
+  const q = e.target.value.trim()
+  if (q.length < 3) {
+    palette.recall = null
+    return
+  }
+  recallTimer = setTimeout(async () => {
+    try {
+      const res = await api(`/api/recall?q=${encodeURIComponent(q)}`)
+      if (!palette.open || $('#palette-input').value.trim() !== q) return
+      palette.recall = { query: q, ...res }
+      renderPaletteList(q)
+    } catch {
+      /* recall briefly unavailable — the static palette still works */
+    }
+  }, 180)
 })
 document.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {

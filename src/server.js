@@ -23,6 +23,7 @@ import { mineAntibodies, reflexVerdict, immuneStats, bumpCounters } from './lib/
 import { spendReport } from './lib/governor.js'
 import { applyCleanRoom, discardCleanRoom, cleanRoomPatch, sweepCleanRooms } from './lib/cleanroom.js'
 import { manifestStatus, adoptManifest, dropManifest, writeManifest } from './lib/manifest.js'
+import { createRecall } from './lib/recall.js'
 import { installReflexHook, uninstallReflexHook, reflexHookInstalled } from './lib/hook-installer.js'
 import { sendNotification } from './lib/notify.js'
 import { randomBytes } from 'node:crypto'
@@ -108,7 +109,7 @@ function validateRoutine(body) {
 }
 
 async function handleApi(req, res, url, ctx) {
-  const { claudeDir, stores } = ctx
+  const { claudeDir, stores, recall } = ctx
   const route = url.pathname
   const method = req.method
 
@@ -296,6 +297,11 @@ async function handleApi(req, res, url, ctx) {
         res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
         return res.end(patch)
       }
+    }
+
+    // ---------- recall (search across every session) ----------
+    if (route === '/api/recall' && method === 'GET') {
+      return json(res, 200, await recall.search(url.searchParams.get('q') || ''))
     }
 
     // ---------- manifests (intents-as-code; adoption is explicit) ----------
@@ -728,7 +734,7 @@ async function handleStatic(res, pathname) {
 
 export function startServer({ port, claudeDir, host = '127.0.0.1', basecampHome }) {
   const stores = openStores(basecampHome)
-  const ctx = { claudeDir, stores, port }
+  const ctx = { claudeDir, stores, port, recall: createRecall(claudeDir, stores.home) }
   startScheduler(stores)
   startReconciler(stores)
 

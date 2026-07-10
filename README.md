@@ -45,6 +45,8 @@ Reality is checked with deterministic local facts where possible (your actual te
 
 **Session Rescue.** Basecamp notices when a Claude Code session died with unfinished work — crashed mid-tool-call, interrupted, or abandoned — and shows it on Home. One click resumes the *actual dead session* (same session ID, full context intact) as a background run that finishes the job and commits. Only a tool with local transcript access can do this.
 
+**Recall — search everything you and Claude have ever done.** Press cmd-K and type: Recall searches every transcript on the machine — your words, Claude's replies, the commands it ran, the files it touched — with typeahead, snippets, and newest-first ranking. Click a result for the session card: what happened, plus a copy-paste `claude --resume` command that reopens that exact session. A pure-JS incremental index under `~/.claude-basecamp` (your Claude data stays read-only); ~150 sessions index in seconds, warm queries answer in milliseconds.
+
 **Talk to your repository's manager.** Every project gets a persistent agent with full Claude Code tools in that directory, plus control over Basecamp itself:
 
 > *"Keep the tests green from now on."* → it creates a standing check
