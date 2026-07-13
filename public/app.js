@@ -2379,6 +2379,57 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('#notif-panel') && !e.target.closest('#notif-trigger')) closeNotifPanel()
 })
 
+/* ---------- theme ---------- */
+
+// Add sun/moon to the existing icon registry, same octicon-style pattern.
+ICONS.sun =
+  '<circle cx="8" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.4"/>' +
+  '<g stroke="currentColor" stroke-width="1.4" stroke-linecap="round">' +
+  '<line x1="8" y1="1" x2="8" y2="2.4"/><line x1="8" y1="13.6" x2="8" y2="15"/>' +
+  '<line x1="1" y1="8" x2="2.4" y2="8"/><line x1="13.6" y1="8" x2="15" y2="8"/>' +
+  '<line x1="3.05" y1="3.05" x2="4.03" y2="4.03"/><line x1="11.97" y1="11.97" x2="12.95" y2="12.95"/>' +
+  '<line x1="3.05" y1="12.95" x2="4.03" y2="11.97"/><line x1="11.97" y1="4.03" x2="12.95" y2="3.05"/>' +
+  '</g>'
+ICONS.moon = '<path fill-rule="evenodd" fill="currentColor" d="M8,2 A6,6 0 1,0 8,14 A6,6 0 1,0 8,2 Z M9.5,3 A3.5,3.5 0 1,0 9.5,10 A3.5,3.5 0 1,0 9.5,3 Z"/>'
+
+const THEME_KEY = 'basecamp-theme'
+
+function getTheme() {
+  try { return localStorage.getItem(THEME_KEY) } catch { return null }
+}
+
+function isDarkActive(theme) {
+  return theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)
+}
+
+function updateThemeIcon(theme) {
+  const btn = $('#theme-toggle')
+  if (!btn) return
+  btn.innerHTML = icon(isDarkActive(theme) ? 'moon' : 'sun', 15)
+}
+
+function applyTheme(theme) {
+  if (theme === 'light' || theme === 'dark') {
+    document.documentElement.setAttribute('data-theme', theme)
+  } else {
+    document.documentElement.removeAttribute('data-theme')
+  }
+  updateThemeIcon(theme)
+}
+
+function toggleTheme() {
+  const next = isDarkActive(getTheme()) ? 'light' : 'dark'
+  try { localStorage.setItem(THEME_KEY, next) } catch {}
+  applyTheme(next)
+}
+
+applyTheme(getTheme())
+$('#theme-toggle').addEventListener('click', toggleTheme)
+// Keep the icon in sync if the user hasn't overridden and the OS theme flips.
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (!getTheme()) updateThemeIcon(null)
+})
+
 /* ---------- navigation + polling ---------- */
 
 const pages = {

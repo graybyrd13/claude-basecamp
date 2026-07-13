@@ -49,6 +49,55 @@
   }
 }
 
+/* Manual theme override (data-theme attribute set via JS + localStorage).
+   Higher specificity than the plain :root above and inside the media
+   query, so it wins regardless of system preference. */
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-subtle: #f6f8fa;
+  --bg-inset: #f6f8fa;
+  --border: #d1d9e0;
+  --border-muted: #e4e9ee;
+  --text: #1f2328;
+  --text-secondary: #454c54;
+  --muted: #59636e;
+  --faint: #8b949e;
+  --green: #1a7f37;
+  --green-bg: #dafbe1;
+  --red: #cf222e;
+  --red-bg: #ffebe9;
+  --attention: #9a6700;
+  --heat-0: #ebedf0;
+  --heat-1: #c6cbd1;
+  --heat-2: #959da5;
+  --heat-3: #586069;
+  --heat-4: #24292e;
+  --shadow: 0 8px 24px rgba(31, 35, 40, 0.12);
+}
+
+:root[data-theme="dark"] {
+  --bg: #0d1117;
+  --bg-subtle: #161b22;
+  --bg-inset: #010409;
+  --border: #30363d;
+  --border-muted: #21262d;
+  --text: #e6edf3;
+  --text-secondary: #b7bfc7;
+  --muted: #8d96a0;
+  --faint: #6e7681;
+  --green: #3fb950;
+  --green-bg: rgba(46, 160, 67, 0.15);
+  --red: #f85149;
+  --red-bg: rgba(248, 81, 73, 0.15);
+  --attention: #d29922;
+  --heat-0: #161b22;
+  --heat-1: #2d333b;
+  --heat-2: #57606a;
+  --heat-3: #99a1aa;
+  --heat-4: #e6edf3;
+  --shadow: 0 8px 24px rgba(1, 4, 9, 0.8);
+}
+
 * { box-sizing: border-box; margin: 0; }
 html, body { height: 100%; }
 
